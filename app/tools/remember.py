@@ -12,11 +12,26 @@ logger = logging.getLogger(__name__)
 
 @mcp.tool()
 def remember(text: str, memory_type: str) -> dict[str, int | str]:
-    """Persist structured memory data for LLM clients without inference.
+    """Store general memories only.
 
-    Receives already structured memory data and persists it via MemoryService.
-    Does not perform inference or classification.
-    """
+Use this tool for:
+- facts
+- events
+- thoughts
+- ideas
+- observations
+
+Do NOT use this tool for:
+- purchases
+- expenses
+- income
+- prices
+- receipts
+- financial transactions
+
+Financial operations must be stored using create_finance_event.
+The text and memory_type must already be determined before calling this tool.
+"""
     logger.info(
         "MCP tool called: tool=remember text=%r memory_type=%r",
         text,
