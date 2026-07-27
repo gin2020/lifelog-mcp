@@ -3,6 +3,11 @@
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
+from app.config.logging import configure_logging
+
+
+configure_logging()
+
 
 mcp = FastMCP(
     "Lifelog",

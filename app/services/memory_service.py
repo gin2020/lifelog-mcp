@@ -1,12 +1,16 @@
 """Сервисный слой для работы с записями памяти."""
 
 from datetime import datetime, timezone
+import logging
 from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models.memory import Memory
+
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryService:
@@ -22,18 +26,42 @@ class MemoryService:
         memory_type: str,
     ) -> Memory:
         """Create and persist a new memory."""
-        now = datetime.now(timezone.utc)
-        memory = Memory(
-            uuid=uuid4(),
-            created_at=now,
-            updated_at=now,
-            text=text,
-            memory_type=memory_type,
+        logger.info(
+            "MemoryService.create_memory started: text=%r memory_type=%r",
+            text,
+            memory_type,
         )
-        self._session.add(memory)
-        self._session.commit()
-        self._session.refresh(memory)
-        return memory
+        try:
+            now = datetime.now(timezone.utc)
+            memory = Memory(
+                uuid=uuid4(),
+                created_at=now,
+                updated_at=now,
+                text=text,
+                memory_type=memory_type,
+            )
+            logger.info("MemoryService.create_memory ORM object created")
+            self._session.add(memory)
+            logger.info("MemoryService.create_memory session.add completed")
+            self._session.commit()
+            logger.info(
+                "MemoryService.create_memory session.commit completed: memory_id=%s",
+                memory.id,
+            )
+            self._session.refresh(memory)
+            logger.info(
+                "MemoryService.create_memory session.refresh completed: memory_id=%s",
+                memory.id,
+            )
+            return memory
+        except Exception:
+            logger.exception("MemoryService.create_memory failed")
+            try:
+                self._session.rollback()
+                logger.info("MemoryService.create_memory session.rollback completed")
+            except Exception:
+                logger.exception("MemoryService.create_memory session.rollback failed")
+            raise
 
     def get_memory(
         self,
