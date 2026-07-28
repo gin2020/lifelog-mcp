@@ -2,10 +2,11 @@ from decimal import Decimal
 
 from pydantic import BaseModel
 
+from app.db.models.finance_item import FinanceCategory
 
 class FinanceItemCreate(BaseModel):
     name: str
-    category: str
+    category: FinanceCategory
     quantity: Decimal
     unit: str
     total_price: Decimal

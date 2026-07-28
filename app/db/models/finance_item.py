@@ -24,7 +24,11 @@ class FinanceCategory(str, Enum):
     VEGETABLES = "vegetables"
     FRUITS = "fruits"
     DRINKS = "drinks"
+    ALCOHOL = "alcohol"
+    TOBACCO = "tobacco"
     HOUSEHOLD = "household"
+    MEDICINE = "medicine"
+    TRANSPORT = "transport"
     OTHER = "other"
 
 

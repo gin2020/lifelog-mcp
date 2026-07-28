@@ -36,6 +36,126 @@ Examples:
 - "Received salary of 70000."
 - "Sold my bicycle for 15000."
 
+Category must be one of these values only:
+
+- dairy
+
+- meat
+
+- vegetables
+
+- fruits
+
+- drinks
+- alcohol
+- tobacco
+
+- household
+- medicine
+- transport
+- other
+
+Choose the category based on the item's meaning.
+
+Examples:
+
+- milk -> dairy
+
+- cheese -> dairy
+
+- yogurt -> dairy
+
+- chicken breast -> meat
+
+- beef -> meat
+
+- fish -> meat
+
+- tomatoes -> vegetables
+
+- potatoes -> vegetables
+
+- onions -> vegetables
+
+- apples -> fruits
+
+- bananas -> fruits
+
+- oranges -> fruits
+
+- coffee -> drinks
+
+- tea -> drinks
+
+- water -> drinks
+
+- juice -> drinks
+
+- energy drink -> drinks
+
+- beer -> alcohol
+
+- wine -> alcohol
+
+- vodka -> alcohol
+
+- whiskey -> alcohol
+
+- cigarettes -> tobacco
+
+- tobacco -> tobacco
+
+- cigars -> tobacco
+
+- laundry detergent -> household
+
+- toilet paper -> household
+
+- dish soap -> household
+
+- medicine -> medicine
+
+- vitamins -> medicine
+
+- painkillers -> medicine
+
+- taxi -> transport
+
+- bus ticket -> transport
+
+- gasoline -> transport
+
+- parking -> transport
+
+- gift -> other
+
+- electronics -> other
+
+- stationery -> othe
+
+Never invent new category names.
+
+Never use localized category names such as "Продукты", "Напитки" or similar.
+
+Use only the enum values listed above.
+
+operation_type:
+- expense
+- income
+
+currency:
+- RUB
+
+quantity:
+Default to 1 if the user does not specify it.
+
+unit:
+Default to "pcs" for countable items.
+Use "kg", "g", "l", "ml" when appropriate.
+
+total_amount:
+Sum of all item prices.
+
 Do not use the remember tool for financial operations.
 """
     logger.info(
