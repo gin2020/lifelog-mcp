@@ -53,6 +53,12 @@ Category must be one of these values only:
 - household
 - medicine
 - transport
+- online_payments
+
+- home
+- salary
+- part_time
+- gift
 - other
 
 Choose the category based on the item's meaning.
@@ -127,7 +133,61 @@ Examples:
 
 - parking -> transport
 
-- gift -> other
+- ChatGPT -> online_payments
+
+- Apple Music -> online_payments
+
+- Netflix -> online_payments
+
+- YouTube Premium -> online_payments
+
+- OpenAI API -> online_payments
+
+- mobile phone top-up -> online_payments
+
+- home internet -> online_payments
+
+- VPS hosting -> online_payments
+
+- domain renewal -> online_payments
+
+- apartment rent -> home
+
+- utilities -> home
+
+- electricity bill -> home
+
+- water bill -> home
+
+- heating -> home
+
+- cement -> home
+
+- putty -> home
+
+- paint -> home
+
+- electrical cable -> home
+
+- wallpaper -> home
+
+- furniture -> home
+
+- monthly salary -> salary
+
+- wages -> salary
+
+- freelance work -> part_time
+
+- side job -> part_time
+
+- extra income -> part_time
+
+- birthday money -> gift
+
+- cash gift -> gift
+
+- holiday gift -> gift
 
 - electronics -> other
 

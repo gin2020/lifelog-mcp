@@ -17,7 +17,7 @@ from app.db.database import Base
 
 
 class FinanceCategory(str, Enum):
-    """Категория товара."""
+    """Категория товара услуги и дохода."""
 
     DAIRY = "dairy"
     MEAT = "meat"
@@ -29,6 +29,11 @@ class FinanceCategory(str, Enum):
     HOUSEHOLD = "household"
     MEDICINE = "medicine"
     TRANSPORT = "transport"
+    ONLINE_PAYMENTS = "online_payments"
+    HOME = "home"
+    SALARY = "salary"
+    PART_TIME = "part_time"
+    GIFT = "gift"
     OTHER = "other"
 
 
