@@ -45,6 +45,7 @@ Category must be one of these values only:
 - vegetables
 
 - fruits
+- grocery
 
 - drinks
 - alcohol
@@ -70,6 +71,10 @@ Examples:
 - cheese -> dairy
 
 - yogurt -> dairy
+
+- eggs -> dairy
+- chicken eggs -> dairy
+- quail eggs -> dair
 
 - chicken breast -> meat
 
@@ -192,6 +197,40 @@ Examples:
 - electronics -> other
 
 - stationery -> othe
+
+- flour -> grocery
+- wheat flour -> grocery
+- rye flour -> grocery
+
+- rice -> grocery
+- buckwheat -> grocery
+- oatmeal -> grocery
+- pasta -> grocery
+
+- lentils -> grocery
+- chickpeas -> grocery
+- beans -> grocery
+- peas -> grocery
+
+- dry yeast -> grocery
+- fresh yeast -> grocery
+
+- sugar -> grocery
+- salt -> grocery
+
+- sunflower oil -> grocery
+- olive oil -> grocery
+
+- ketchup -> grocery
+- mayonnaise -> grocery
+- soy sauce -> grocery
+- tomato paste -> grocery
+
+- spices -> grocery
+- black pepper -> grocery
+- bay leaf -> grocery
+
+Grocery includes shelf-stable pantry foods such as flour, grains, pasta, legumes, sauces, cooking oil, sugar, salt, spices, and similar pantry products.
 
 Never invent new category names.
 
