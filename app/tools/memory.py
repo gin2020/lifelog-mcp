@@ -3,6 +3,7 @@
 import logging
 
 from app.core.mcp import mcp
+from app.core.dependencies import get_default_user_id
 from app.db.database import SessionLocal
 from app.services.memory_service import MemoryService
 
@@ -21,7 +22,9 @@ def create_memory(text: str, memory_type: str) -> dict[str, int | str]:
     try:
         with SessionLocal() as session:
             logger.info("MCP tool entered MemoryService: tool=create_memory")
-            memory = MemoryService(session).create_memory(text, memory_type)
+            memory = MemoryService(session).create_memory(
+                get_default_user_id(session), text, memory_type
+            )
     except Exception:
         logger.exception("MCP tool failed: tool=create_memory")
         raise

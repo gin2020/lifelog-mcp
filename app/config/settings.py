@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     """Конфигурация, необходимая для инфраструктуры приложения."""
 
     database_url: PostgresDsn
+    default_user_telegram_id: int
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -9,6 +9,7 @@ from sqlalchemy import (
     BigInteger,
     DateTime,
     Enum as SqlEnum,
+    ForeignKey,
     Identity,
     Numeric,
     String,
@@ -35,6 +36,10 @@ class FinanceEvent(Base):
         BigInteger,
         Identity(),
         primary_key=True,
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
 
     uuid: Mapped[UUID | None] = mapped_column(

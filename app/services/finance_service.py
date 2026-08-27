@@ -24,11 +24,13 @@ class FinanceService:
 
     def create_event(
         self,
+        user_id: int,
         payload: FinanceEventCreate,
     ) -> FinanceEvent:
         """Create and persist a new finance event."""
         logger.info(
-            "FinanceService.create_event started: operation_type=%r",
+            "FinanceService.create_event started: user_id=%s operation_type=%r",
+            user_id,
             payload.operation_type,
         )
 
@@ -36,6 +38,7 @@ class FinanceService:
             now = datetime.now(timezone.utc)
 
             event = FinanceEvent(
+                user_id=user_id,
                 uuid=uuid4(),
                 created_at=now,
                 updated_at=now,
@@ -79,27 +82,35 @@ class FinanceService:
 
     def get_event(
         self,
+        user_id: int,
         event_id: int,
     ) -> FinanceEvent | None:
         """Return an event by its primary key, if it exists."""
-        return self._session.get(FinanceEvent, event_id)
+        statement = select(FinanceEvent).where(
+            FinanceEvent.id == event_id,
+            FinanceEvent.user_id == user_id,
+        )
+        return self._session.scalar(statement)
 
     def list_events(
         self,
+        user_id: int,
     ) -> list[FinanceEvent]:
         """Return all finance events ordered by creation time."""
-        statement = select(FinanceEvent).order_by(
-            FinanceEvent.created_at,
-            FinanceEvent.id,
+        statement = select(FinanceEvent).where(
+            FinanceEvent.user_id == user_id
+        ).order_by(
+            FinanceEvent.created_at, FinanceEvent.id
         )
         return list(self._session.scalars(statement))
 
     def delete_event(
         self,
+        user_id: int,
         event_id: int,
     ) -> bool:
         """Delete an event and return whether it existed."""
-        event = self.get_event(event_id)
+        event = self.get_event(user_id, event_id)
 
         if event is None:
             return False

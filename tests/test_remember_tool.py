@@ -4,6 +4,7 @@ import unittest
 from uuid import UUID
 
 from app.db.database import SessionLocal
+from app.core.dependencies import get_default_user_id
 from app.services.memory_service import MemoryService
 from app.tools.remember import remember
 
@@ -14,11 +15,12 @@ class RememberToolTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.session = SessionLocal()
         self.service = MemoryService(self.session)
+        self.user_id = get_default_user_id(self.session)
         self.memory_id: int | None = None
 
     def tearDown(self) -> None:
         if self.memory_id is not None:
-            self.service.delete_memory(self.memory_id)
+            self.service.delete_memory(self.user_id, self.memory_id)
         self.session.close()
 
     def test_remember_persists_structured_memory(self) -> None:
@@ -30,7 +32,7 @@ class RememberToolTestCase(unittest.TestCase):
         self.assertIsInstance(result["id"], int)
         UUID(result["uuid"])
 
-        memory = self.service.get_memory(result["id"])
+        memory = self.service.get_memory(self.user_id, result["id"])
         self.assertIsNotNone(memory)
         assert memory is not None
         self.assertEqual(memory.text, "Bought milk for 120 rubles")

@@ -3,6 +3,7 @@
 import unittest
 
 from app.db.database import SessionLocal
+from app.core.dependencies import get_default_user_id
 from app.services.memory_service import MemoryService
 
 
@@ -12,16 +13,17 @@ class MemoryServiceTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.session = SessionLocal()
         self.service = MemoryService(self.session)
+        self.user_id = get_default_user_id(self.session)
         self.created_ids: list[int] = []
 
     def tearDown(self) -> None:
         for memory_id in self.created_ids:
-            self.service.delete_memory(memory_id)
+            self.service.delete_memory(self.user_id, memory_id)
         self.session.close()
 
     def create_memory(self, text: str = "Test memory") -> int:
         """Создаёт запись и регистрирует её для очистки после теста."""
-        memory = self.service.create_memory(text, "test")
+        memory = self.service.create_memory(self.user_id, text, "test")
         self.created_ids.append(memory.id)
         return memory.id
 
@@ -29,7 +31,7 @@ class MemoryServiceTestCase(unittest.TestCase):
         """Сервис создаёт запись с идентификатором и UUID."""
         memory_id = self.create_memory()
 
-        memory = self.service.get_memory(memory_id)
+        memory = self.service.get_memory(self.user_id, memory_id)
 
         self.assertIsNotNone(memory)
         assert memory is not None
@@ -43,7 +45,7 @@ class MemoryServiceTestCase(unittest.TestCase):
         """Сервис возвращает запись по её первичному ключу."""
         memory_id = self.create_memory("Memory to get")
 
-        memory = self.service.get_memory(memory_id)
+        memory = self.service.get_memory(self.user_id, memory_id)
 
         self.assertIsNotNone(memory)
         assert memory is not None
@@ -55,7 +57,7 @@ class MemoryServiceTestCase(unittest.TestCase):
         first_id = self.create_memory("First memory")
         second_id = self.create_memory("Second memory")
 
-        memory_ids = {memory.id for memory in self.service.list_memories()}
+        memory_ids = {memory.id for memory in self.service.list_memories(self.user_id)}
 
         self.assertTrue({first_id, second_id}.issubset(memory_ids))
 
@@ -63,8 +65,8 @@ class MemoryServiceTestCase(unittest.TestCase):
         """Сервис удаляет запись и возвращает признак успешного удаления."""
         memory_id = self.create_memory("Memory to delete")
 
-        deleted = self.service.delete_memory(memory_id)
+        deleted = self.service.delete_memory(self.user_id, memory_id)
         self.created_ids.remove(memory_id)
 
         self.assertTrue(deleted)
-        self.assertIsNone(self.service.get_memory(memory_id))
+        self.assertIsNone(self.service.get_memory(self.user_id, memory_id))

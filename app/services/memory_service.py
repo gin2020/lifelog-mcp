@@ -22,18 +22,21 @@ class MemoryService:
 
     def create_memory(
         self,
+        user_id: int,
         text: str,
         memory_type: str,
     ) -> Memory:
         """Create and persist a new memory."""
         logger.info(
-            "MemoryService.create_memory started: text=%r memory_type=%r",
+            "MemoryService.create_memory started: user_id=%s text=%r memory_type=%r",
+            user_id,
             text,
             memory_type,
         )
         try:
             now = datetime.now(timezone.utc)
             memory = Memory(
+                user_id=user_id,
                 uuid=uuid4(),
                 created_at=now,
                 updated_at=now,
@@ -65,24 +68,35 @@ class MemoryService:
 
     def get_memory(
         self,
+        user_id: int,
         memory_id: int,
     ) -> Memory | None:
         """Return a memory by its primary key, if it exists."""
-        return self._session.get(Memory, memory_id)
+        statement = select(Memory).where(
+            Memory.id == memory_id,
+            Memory.user_id == user_id,
+        )
+        return self._session.scalar(statement)
 
     def list_memories(
         self,
+        user_id: int,
     ) -> list[Memory]:
         """Return all memories ordered by creation time."""
-        statement = select(Memory).order_by(Memory.created_at, Memory.id)
+        statement = (
+            select(Memory)
+            .where(Memory.user_id == user_id)
+            .order_by(Memory.created_at, Memory.id)
+        )
         return list(self._session.scalars(statement))
 
     def delete_memory(
         self,
+        user_id: int,
         memory_id: int,
     ) -> bool:
         """Delete a memory and return whether it existed."""
-        memory = self.get_memory(memory_id)
+        memory = self.get_memory(user_id, memory_id)
         if memory is None:
             return False
 
