@@ -7,7 +7,7 @@ from typing import Annotated
 from pydantic import Field
 
 from app.core.mcp import mcp
-from app.core.dependencies import get_default_user_id
+from app.core.dependencies import get_request_user_id
 from app.db.database import SessionLocal
 from app.db.models.finance_event import OperationType
 from app.db.models.finance_item import FinanceCategory
@@ -78,7 +78,7 @@ def query_finance(
                 "MCP tool entered FinanceQueryService: tool=query_finance"
             )
 
-            repository = FinanceRepository(session, get_default_user_id(session))
+            repository = FinanceRepository(session, get_request_user_id(session))
             service = FinanceQueryService(repository)
 
             result = service.query(request)

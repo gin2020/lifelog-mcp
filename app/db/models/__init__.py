@@ -9,6 +9,12 @@
 from app.db.models.finance_event import FinanceEvent
 from app.db.models.finance_item import FinanceItem
 from app.db.models.memory import Memory
+from app.db.models.oauth import (
+    OAuthAuthorizationCode,
+    OAuthAuthorizationRequest,
+    OAuthClient,
+    OAuthRefreshToken,
+)
 from app.db.models.user import User, UserIdentity
 
 __all__ = [
@@ -17,4 +23,8 @@ __all__ = [
     "FinanceItem",
     "User",
     "UserIdentity",
+    "OAuthClient",
+    "OAuthAuthorizationRequest",
+    "OAuthAuthorizationCode",
+    "OAuthRefreshToken",
 ]

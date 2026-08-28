@@ -3,7 +3,7 @@
 import logging
 
 from app.core.mcp import mcp
-from app.core.dependencies import get_default_user_id
+from app.core.dependencies import get_request_user_id
 from app.db.database import SessionLocal
 from app.schemas.finance import FinanceEventCreate
 from app.services.finance_service import FinanceService
@@ -271,7 +271,7 @@ Do not use the remember tool for financial operations.
             )
 
             finance_event = FinanceService(session).create_event(
-                get_default_user_id(session), event
+                get_request_user_id(session), event
             )
 
     except Exception:
