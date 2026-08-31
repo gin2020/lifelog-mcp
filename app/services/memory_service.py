@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models.memory import Memory
+from app.services.notification_outbox_service import NotificationOutboxService
 
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,13 @@ class MemoryService:
             logger.info("MemoryService.create_memory ORM object created")
             self._session.add(memory)
             logger.info("MemoryService.create_memory session.add completed")
+            self._session.flush()
+            NotificationOutboxService(self._session).enqueue_created(
+                user_id=user_id,
+                aggregate_type="memory",
+                aggregate_id=memory.id,
+                event_type="memory.created",
+            )
             self._session.commit()
             logger.info(
                 "MemoryService.create_memory session.commit completed: memory_id=%s",

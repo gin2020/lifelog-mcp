@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.db.models.finance_event import FinanceEvent
 from app.db.models.finance_item import FinanceItem
 from app.schemas.finance import FinanceEventCreate
+from app.services.notification_outbox_service import NotificationOutboxService
 
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,13 @@ class FinanceService:
                 )
 
             self._session.add(event)
+            self._session.flush()
+            NotificationOutboxService(self._session).enqueue_created(
+                user_id=user_id,
+                aggregate_type="finance_event",
+                aggregate_id=event.id,
+                event_type="finance_event.created",
+            )
             self._session.commit()
             self._session.refresh(event)
 

@@ -9,6 +9,7 @@
 from app.db.models.finance_event import FinanceEvent
 from app.db.models.finance_item import FinanceItem
 from app.db.models.memory import Memory
+from app.db.models.notification import NotificationOutbox, TelegramNotificationSubscription
 from app.db.models.oauth import (
     OAuthAuthorizationCode,
     OAuthAuthorizationRequest,
@@ -27,4 +28,6 @@ __all__ = [
     "OAuthAuthorizationRequest",
     "OAuthAuthorizationCode",
     "OAuthRefreshToken",
+    "NotificationOutbox",
+    "TelegramNotificationSubscription",
 ]

@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     telegram_client_id: str | None = None
     telegram_client_secret: SecretStr | None = None
     telegram_redirect_uri: AnyHttpUrl | None = None
+    telegram_bot_token: SecretStr | None = None
+    telegram_bot_username: str | None = None
+    telegram_webhook_secret: SecretStr | None = None
+    telegram_webhook_url: AnyHttpUrl | None = None
     jwt_signing_key: SecretStr | None = None
     jwt_access_token_ttl_seconds: int = 3600
     oauth_refresh_token_ttl_seconds: int = 2_592_000

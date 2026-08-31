@@ -18,7 +18,7 @@ class MemoryServiceErrorTestCase(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "commit failed"):
             service.create_memory(1, "test", "test")
 
-        session.add.assert_called_once()
+        self.assertEqual(session.add.call_count, 2)
         session.commit.assert_called_once()
         session.refresh.assert_not_called()
         session.rollback.assert_called_once()

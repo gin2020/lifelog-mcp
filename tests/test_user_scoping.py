@@ -5,6 +5,7 @@ import unittest
 
 from app.db.database import SessionLocal
 from app.db.models.finance_item import FinanceCategory
+from app.db.models.notification import NotificationOutbox
 from app.db.models.user import User
 from app.db.repositories.finance_repository import FinanceRepository
 from app.schemas.finance import FinanceEventCreate, FinanceItemCreate
@@ -33,6 +34,11 @@ class UserScopingTestCase(unittest.TestCase):
         for event_id in self.event_ids:
             self.finance_service.delete_event(self.first_user.id, event_id)
             self.finance_service.delete_event(self.second_user.id, event_id)
+        self.session.execute(
+            NotificationOutbox.__table__.delete().where(
+                NotificationOutbox.user_id.in_([self.first_user.id, self.second_user.id])
+            )
+        )
         self.session.delete(self.first_user)
         self.session.delete(self.second_user)
         self.session.commit()
