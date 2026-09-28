@@ -744,6 +744,104 @@ Telegram — текущий канал, а Outbox допускает добав�
 
 ---
 
+# 10. Database Backup
+
+LifeLog includes a standalone PostgreSQL backup service.
+
+The backup service is intentionally separate from the MCP server and Telegram Notification Dispatcher. It does not use `notification_outbox`.
+
+### Backup flow
+
+```text
+PostgreSQL
+    ↓
+pg_dump -Fc
+    ↓
+AES-256-GCM encryption
+    ↓
+Telegram Bot API (sendDocument)
+    ↓
+Encrypted backup in Telegram
+```
+
+The backup is created once per day at the configured time.
+
+### Configuration
+
+Add the following variables to `.env`:
+
+```text
+BACKUP_ENABLED=true
+BACKUP_TIME=09:00
+BACKUP_TIMEZONE=Europe/Berlin
+BACKUP_ENCRYPTION_KEY=<random-secret>
+```
+
+The encryption key is a secret and must never be committed to Git or written to logs.
+
+The backup service uses the existing:
+
+- `DATABASE_URL` for PostgreSQL connection information;
+- `TELEGRAM_BOT_TOKEN` for Telegram Bot API access;
+- `DEFAULT_USER_TELEGRAM_ID` as the Telegram recipient.
+
+### Backup commands
+
+Run a backup immediately:
+
+```bash
+.venv/bin/python -m scripts.backup --run-once
+```
+
+Run the backup/recovery validation:
+
+```bash
+.venv/bin/python -m scripts.backup --test
+```
+
+Decrypt a downloaded encrypted backup:
+
+```bash
+.venv/bin/python -m scripts.backup --decrypt <encrypted-file>
+```
+
+The decrypted dump should only exist temporarily and must be treated as sensitive data.
+
+### PM2
+
+Run the backup service as a separate PM2 process:
+
+```bash
+pm2 start .venv/bin/python --name lifelog-backup \
+  --cwd /root/lifelog-mcp -- -m scripts.backup
+
+pm2 save
+```
+
+Check the process:
+
+```bash
+pm2 status
+pm2 logs lifelog-backup
+```
+
+The service keeps its own lock/state information to avoid duplicate execution after restarts.
+
+### Security
+
+- PostgreSQL backups use the custom `pg_dump -Fc` format.
+- The backup is encrypted with AES-256-GCM before it is uploaded.
+- Unencrypted temporary files are removed after successful encryption/upload and during failure cleanup.
+- Encryption keys, database credentials and Telegram credentials are never included in the backup message.
+- Telegram receives only the encrypted backup file.
+- The backup job does not depend on the notification outbox.
+
+### Recovery validation
+
+The `--test` command validates the backup/recovery path without modifying the production database. It creates a temporary backup, decrypts it, verifies that the PostgreSQL dump is readable, and cleans up temporary files.
+
+For a production restore, first decrypt the downloaded Telegram file and then restore the resulting PostgreSQL dump with the appropriate PostgreSQL restore tooling.
+
 # License
 
 Отдельная лицензия проекта в репозитории пока не заявлена.
