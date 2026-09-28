@@ -9,6 +9,8 @@ venv/
 
 # Environment
 .env
+.backup-state.json
+.backup.lock
 
 # IDE
 .vscode/
