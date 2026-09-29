@@ -1,4 +1,4 @@
-"""Creation of safe, durable notification events inside application transactions."""
+"""Creation of safe, durable lifecycle events inside application transactions."""
 
 import logging
 
@@ -26,6 +26,54 @@ class NotificationOutboxService:
         event_type: str,
     ) -> NotificationOutbox:
         """Queue a privacy-safe notification for a newly persisted aggregate."""
+        return self.enqueue_event(
+            user_id=user_id,
+            aggregate_type=aggregate_type,
+            aggregate_id=aggregate_id,
+            event_type=event_type,
+        )
+
+    def enqueue_updated(
+        self,
+        *,
+        user_id: int,
+        aggregate_type: str,
+        aggregate_id: int,
+        event_type: str,
+    ) -> NotificationOutbox:
+        """Queue a privacy-safe notification for an updated aggregate."""
+        return self.enqueue_event(
+            user_id=user_id,
+            aggregate_type=aggregate_type,
+            aggregate_id=aggregate_id,
+            event_type=event_type,
+        )
+
+    def enqueue_deleted(
+        self,
+        *,
+        user_id: int,
+        aggregate_type: str,
+        aggregate_id: int,
+        event_type: str,
+    ) -> NotificationOutbox:
+        """Queue a privacy-safe notification for a deleted aggregate."""
+        return self.enqueue_event(
+            user_id=user_id,
+            aggregate_type=aggregate_type,
+            aggregate_id=aggregate_id,
+            event_type=event_type,
+        )
+
+    def enqueue_event(
+        self,
+        *,
+        user_id: int,
+        aggregate_type: str,
+        aggregate_id: int,
+        event_type: str,
+    ) -> NotificationOutbox:
+        """Add one lifecycle event to the caller's current transaction."""
         event = NotificationOutbox(
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,

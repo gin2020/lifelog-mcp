@@ -8,7 +8,12 @@ from app.db.models.finance_item import FinanceCategory
 from app.db.models.notification import NotificationOutbox
 from app.db.models.user import User
 from app.db.repositories.finance_repository import FinanceRepository
-from app.schemas.finance import FinanceEventCreate, FinanceItemCreate
+from app.schemas.finance import (
+    FinanceEventCreate,
+    FinanceEventUpdate,
+    FinanceItemCreate,
+    FinanceItemUpdate,
+)
 from app.services.finance_service import FinanceService
 from app.services.memory_service import MemoryService
 
@@ -84,3 +89,26 @@ class UserScopingTestCase(unittest.TestCase):
         self.assertEqual(other_repository.get_total_amount(), Decimal("0"))
         self.assertEqual(own_repository.get_total_amount(), Decimal("99.00"))
         self.assertIsNone(self.finance_service.get_event(self.second_user.id, event.id))
+        item = event.items[0]
+        self.assertIsNone(
+            self.finance_service.update_event(
+                self.second_user.id,
+                event.id,
+                FinanceEventUpdate(place="foreign market"),
+            )
+        )
+        self.assertIsNone(
+            self.finance_service.update_item(
+                self.second_user.id,
+                event.id,
+                item.id,
+                FinanceItemUpdate(total_price=Decimal("1.00")),
+            )
+        )
+        self.assertIsNone(
+            self.finance_service.delete_item(
+                self.second_user.id,
+                event.id,
+                item.id,
+            )
+        )

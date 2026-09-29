@@ -102,8 +102,14 @@ class NotificationDispatcher:
 
     @staticmethod
     def _message_text(event: NotificationOutbox) -> str:
-        """Build a generic confirmation without including user content."""
-        return f"Lifelog: сохранена запись {event.aggregate_type} #{event.aggregate_id}."
+        """Build a lifecycle confirmation without including user content."""
+        action = {
+            "created": "сохранена",
+            "updated": "изменена",
+            "deleted": "удалена",
+            "item_deleted": "удалена",
+        }.get(event.event_type.rsplit(".", maxsplit=1)[-1], "сохранена")
+        return f"Lifelog: {action} запись {event.aggregate_type} #{event.aggregate_id}."
 
     def _mark_sent(self, event_uuid) -> None:
         """Persist successful delivery."""

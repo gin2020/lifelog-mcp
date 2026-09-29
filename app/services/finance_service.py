@@ -143,6 +143,12 @@ class FinanceService:
         event.updated_at = datetime.now(timezone.utc)
 
         try:
+            NotificationOutboxService(self._session).enqueue_updated(
+                user_id=user_id,
+                aggregate_type="finance_event",
+                aggregate_id=event.id,
+                event_type="finance_event.updated",
+            )
             self._session.commit()
             self._session.refresh(event)
             return event
@@ -178,6 +184,12 @@ class FinanceService:
         event.updated_at = datetime.now(timezone.utc)
 
         try:
+            NotificationOutboxService(self._session).enqueue_updated(
+                user_id=user_id,
+                aggregate_type="finance_event",
+                aggregate_id=event.id,
+                event_type="finance_event.updated",
+            )
             self._session.commit()
             self._session.refresh(event)
             self._session.refresh(item)
@@ -211,6 +223,12 @@ class FinanceService:
         event.updated_at = datetime.now(timezone.utc)
 
         try:
+            NotificationOutboxService(self._session).enqueue_deleted(
+                user_id=user_id,
+                aggregate_type="finance_event",
+                aggregate_id=event.id,
+                event_type="finance_event.item_deleted",
+            )
             self._session.commit()
             self._session.refresh(event)
             return event
@@ -243,6 +261,12 @@ class FinanceService:
 
         try:
             self._session.delete(event)
+            NotificationOutboxService(self._session).enqueue_deleted(
+                user_id=user_id,
+                aggregate_type="finance_event",
+                aggregate_id=event_id,
+                event_type="finance_event.deleted",
+            )
             self._session.commit()
             return True
         except Exception:

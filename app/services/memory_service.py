@@ -109,9 +109,19 @@ class MemoryService:
         if memory is None:
             return False
 
-        self._session.delete(memory)
-        self._session.commit()
-        return True
+        try:
+            self._session.delete(memory)
+            NotificationOutboxService(self._session).enqueue_deleted(
+                user_id=user_id,
+                aggregate_type="memory",
+                aggregate_id=memory_id,
+                event_type="memory.deleted",
+            )
+            self._session.commit()
+            return True
+        except Exception:
+            self._session.rollback()
+            raise
 
     def update_memory(
         self,
@@ -131,6 +141,12 @@ class MemoryService:
         memory.updated_at = datetime.now(timezone.utc)
 
         try:
+            NotificationOutboxService(self._session).enqueue_updated(
+                user_id=user_id,
+                aggregate_type="memory",
+                aggregate_id=memory.id,
+                event_type="memory.updated",
+            )
             self._session.commit()
             self._session.refresh(memory)
             return memory
