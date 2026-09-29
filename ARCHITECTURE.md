@@ -102,9 +102,26 @@ app/main.py
 
 Низкоуровневое создание memory.
 
+### `update_memory` / `delete_memory`
+
+Изменение и удаление memory в ownership scope.
+
 ### `create_finance_event`
 
 Создание структурированной финансовой операции.
+
+### `update_finance_event`
+
+Изменение метаданных финансовой операции.
+
+### `update_finance_item` / `delete_finance_item`
+
+Изменение или удаление отдельной позиции финансовой операции с атомарным
+пересчётом `FinanceEvent.total_amount` по оставшимся позициям.
+
+### `delete_finance_event`
+
+Удаление финансовой операции вместе с её позициями.
 
 ### `query_finance`
 
@@ -287,6 +304,9 @@ FinanceQueryResult
 Фильтры: категория, тип операции, название товара, место, `date_from`, `date_to`.
 
 Сортировка: `date`, `amount`, `title`, `place`, `category`, `count`; направления `asc` и `desc`.
+
+Результаты режима `transactions` содержат `event_id` и `item_id`, необходимые
+для адресного редактирования и удаления позиции через MCP.
 
 ---
 

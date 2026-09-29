@@ -39,6 +39,8 @@ class FinanceRepository:
     ) -> list[dict[str, object]]:
         """Возвращает отфильтрованные позиции операций."""
         statement = select(
+            FinanceEvent.id.label("event_id"),
+            FinanceItem.id.label("item_id"),
             FinanceEvent.created_at.label("date"),
             FinanceItem.name.label("title"),
             FinanceItem.category,

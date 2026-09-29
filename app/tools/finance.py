@@ -5,7 +5,11 @@ import logging
 from app.core.mcp import mcp
 from app.core.dependencies import get_request_user_id
 from app.db.database import SessionLocal
-from app.schemas.finance import FinanceEventCreate
+from app.schemas.finance import (
+    FinanceEventCreate,
+    FinanceEventUpdate,
+    FinanceItemUpdate,
+)
 from app.services.finance_service import FinanceService
 
 
@@ -290,4 +294,94 @@ Do not use the remember tool for financial operations.
         "id": finance_event.id,
         "uuid": str(finance_event.uuid),
         "status": "created",
+    }
+
+
+@mcp.tool()
+def update_finance_event(
+    event_id: int,
+    changes: FinanceEventUpdate,
+) -> dict[str, int | str]:
+    """Update finance event metadata without changing its items."""
+    with SessionLocal() as session:
+        event = FinanceService(session).update_event(
+            get_request_user_id(session), event_id, changes
+        )
+
+    if event is None:
+        return {"id": event_id, "status": "not_found"}
+
+    return {
+        "id": event.id,
+        "uuid": str(event.uuid),
+        "status": "updated",
+        "total_amount": str(event.total_amount),
+    }
+
+
+@mcp.tool()
+def update_finance_item(
+    event_id: int,
+    item_id: int,
+    changes: FinanceItemUpdate,
+) -> dict[str, int | str]:
+    """Update one FinanceItem and recalculate the parent event total."""
+    with SessionLocal() as session:
+        result = FinanceService(session).update_item(
+            get_request_user_id(session), event_id, item_id, changes
+        )
+
+    if result is None:
+        return {
+            "event_id": event_id,
+            "item_id": item_id,
+            "status": "not_found",
+        }
+
+    event, item = result
+    return {
+        "event_id": event.id,
+        "item_id": item.id,
+        "status": "updated",
+        "total_amount": str(event.total_amount),
+    }
+
+
+@mcp.tool()
+def delete_finance_item(
+    event_id: int,
+    item_id: int,
+) -> dict[str, int | str]:
+    """Delete one FinanceItem and recalculate the parent event total."""
+    with SessionLocal() as session:
+        event = FinanceService(session).delete_item(
+            get_request_user_id(session), event_id, item_id
+        )
+
+    if event is None:
+        return {
+            "event_id": event_id,
+            "item_id": item_id,
+            "status": "not_found",
+        }
+
+    return {
+        "event_id": event.id,
+        "item_id": item_id,
+        "status": "deleted",
+        "total_amount": str(event.total_amount),
+    }
+
+
+@mcp.tool()
+def delete_finance_event(event_id: int) -> dict[str, int | str]:
+    """Delete an owned finance event and all of its items."""
+    with SessionLocal() as session:
+        deleted = FinanceService(session).delete_event(
+            get_request_user_id(session), event_id
+        )
+
+    return {
+        "id": event_id,
+        "status": "deleted" if deleted else "not_found",
     }

@@ -13,6 +13,8 @@ from app.schemas.finance_query_request import FinanceQueryMode
 class FinanceTransactionResult(BaseModel):
     """Одна позиция финансовой операции."""
 
+    event_id: int
+    item_id: int
     date: datetime | None
     title: str
     category: FinanceCategory

@@ -5,6 +5,7 @@ import logging
 from app.core.mcp import mcp
 from app.core.dependencies import get_request_user_id
 from app.db.database import SessionLocal
+from app.schemas.memory import MemoryUpdate
 from app.services.memory_service import MemoryService
 
 
@@ -39,4 +40,39 @@ def create_memory(text: str, memory_type: str) -> dict[str, int | str]:
         "id": memory.id,
         "uuid": str(memory.uuid),
         "status": "created",
+    }
+
+
+@mcp.tool()
+def update_memory(
+    memory_id: int,
+    changes: MemoryUpdate,
+) -> dict[str, int | str]:
+    """Update an owned memory record."""
+    with SessionLocal() as session:
+        memory = MemoryService(session).update_memory(
+            get_request_user_id(session), memory_id, changes
+        )
+
+    if memory is None:
+        return {"id": memory_id, "status": "not_found"}
+
+    return {
+        "id": memory.id,
+        "uuid": str(memory.uuid),
+        "status": "updated",
+    }
+
+
+@mcp.tool()
+def delete_memory(memory_id: int) -> dict[str, int | str]:
+    """Delete an owned memory record."""
+    with SessionLocal() as session:
+        deleted = MemoryService(session).delete_memory(
+            get_request_user_id(session), memory_id
+        )
+
+    return {
+        "id": memory_id,
+        "status": "deleted" if deleted else "not_found",
     }

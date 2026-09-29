@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models.memory import Memory
+from app.schemas.memory import MemoryUpdate
 from app.services.notification_outbox_service import NotificationOutboxService
 
 
@@ -111,3 +112,28 @@ class MemoryService:
         self._session.delete(memory)
         self._session.commit()
         return True
+
+    def update_memory(
+        self,
+        user_id: int,
+        memory_id: int,
+        changes: MemoryUpdate,
+    ) -> Memory | None:
+        """Update one owned memory and return it, if it exists."""
+        memory = self.get_memory(user_id, memory_id)
+        if memory is None:
+            return None
+
+        if changes.text is not None:
+            memory.text = changes.text
+        if changes.memory_type is not None:
+            memory.memory_type = changes.memory_type
+        memory.updated_at = datetime.now(timezone.utc)
+
+        try:
+            self._session.commit()
+            self._session.refresh(memory)
+            return memory
+        except Exception:
+            self._session.rollback()
+            raise

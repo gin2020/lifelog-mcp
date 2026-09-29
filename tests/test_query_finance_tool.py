@@ -133,6 +133,8 @@ class QueryFinanceToolTestCase(unittest.TestCase):
         )
 
         self.assertEqual(result.mode, FinanceQueryMode.TRANSACTIONS)
+        self.assertTrue(all(item.event_id > 0 for item in result.transactions))
+        self.assertTrue(all(item.item_id > 0 for item in result.transactions))
         self.assertEqual([item.title for item in result.transactions], [
             f"{self.product_prefix}beef",
             f"{self.product_prefix}milk",
