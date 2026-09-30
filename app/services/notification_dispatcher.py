@@ -113,7 +113,10 @@ class NotificationDispatcher:
 
         if (
             event.aggregate_type == "finance_event"
-            and event.event_type == "finance_event.created"
+            and event.event_type in {
+                "finance_event.created",
+                "finance_event.updated",
+            }
         ):
             amount = event.payload.get("total_amount")
             currency = event.payload.get("currency")
