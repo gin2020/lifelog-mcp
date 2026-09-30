@@ -197,6 +197,10 @@ class FinanceService:
                 aggregate_type="finance_event",
                 aggregate_id=event.id,
                 event_type="finance_event.updated",
+                payload={
+                    "total_amount": str(event.total_amount),
+                    "currency": event.currency,
+                },
             )
             self._session.commit()
             self._session.refresh(event)
