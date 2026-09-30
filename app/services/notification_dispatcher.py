@@ -1,6 +1,7 @@
 """Asynchronous delivery worker for durable notification outbox records."""
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 import logging
 
 from sqlalchemy import and_, or_, select
@@ -109,6 +110,23 @@ class NotificationDispatcher:
             "deleted": "удалена",
             "item_deleted": "удалена",
         }.get(event.event_type.rsplit(".", maxsplit=1)[-1], "сохранена")
+
+        if (
+            event.aggregate_type == "finance_event"
+            and event.event_type == "finance_event.created"
+        ):
+            amount = event.payload.get("total_amount")
+            currency = event.payload.get("currency")
+            if amount is not None and currency:
+                try:
+                    amount_text = format(Decimal(str(amount)).normalize(), "f")
+                except (InvalidOperation, ValueError):
+                    amount_text = str(amount)
+                return (
+                    f"Lifelog: {action} запись {event.aggregate_type} "
+                    f"#{event.aggregate_id} - {amount_text} {currency}."
+                )
+
         return f"Lifelog: {action} запись {event.aggregate_type} #{event.aggregate_id}."
 
     def _mark_sent(self, event_uuid) -> None:

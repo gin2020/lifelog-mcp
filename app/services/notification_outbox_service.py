@@ -24,6 +24,7 @@ class NotificationOutboxService:
         aggregate_type: str,
         aggregate_id: int,
         event_type: str,
+        payload: dict[str, str | int] | None = None,
     ) -> NotificationOutbox:
         """Queue a privacy-safe notification for a newly persisted aggregate."""
         return self.enqueue_event(
@@ -31,6 +32,7 @@ class NotificationOutboxService:
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,
             event_type=event_type,
+            payload=payload,
         )
 
     def enqueue_updated(
@@ -40,6 +42,7 @@ class NotificationOutboxService:
         aggregate_type: str,
         aggregate_id: int,
         event_type: str,
+        payload: dict[str, str | int] | None = None,
     ) -> NotificationOutbox:
         """Queue a privacy-safe notification for an updated aggregate."""
         return self.enqueue_event(
@@ -47,6 +50,7 @@ class NotificationOutboxService:
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,
             event_type=event_type,
+            payload=payload,
         )
 
     def enqueue_deleted(
@@ -56,6 +60,7 @@ class NotificationOutboxService:
         aggregate_type: str,
         aggregate_id: int,
         event_type: str,
+        payload: dict[str, str | int] | None = None,
     ) -> NotificationOutbox:
         """Queue a privacy-safe notification for a deleted aggregate."""
         return self.enqueue_event(
@@ -63,6 +68,7 @@ class NotificationOutboxService:
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,
             event_type=event_type,
+            payload=payload,
         )
 
     def enqueue_event(
@@ -72,6 +78,7 @@ class NotificationOutboxService:
         aggregate_type: str,
         aggregate_id: int,
         event_type: str,
+        payload: dict[str, str | int] | None = None,
     ) -> NotificationOutbox:
         """Add one lifecycle event to the caller's current transaction."""
         event = NotificationOutbox(
@@ -83,6 +90,7 @@ class NotificationOutboxService:
                 "aggregate_type": aggregate_type,
                 "aggregate_id": aggregate_id,
                 "event_type": event_type,
+                **(payload or {}),
             },
         )
         self._session.add(event)
