@@ -1,6 +1,7 @@
 """Staged MTProto user authorization and account persistence."""
 
 from datetime import datetime, timedelta, timezone
+import logging
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -11,6 +12,9 @@ from app.db.database import SessionLocal
 from app.db.models.telegram_user import TelegramAccount, TelegramAuthFlow
 from app.services.telegram_session_crypto import TelegramSessionCrypto
 from app.services.telegram_user_api import TelegramUserApi, TelegramUserApiError, translate_telegram_error
+
+
+logger = logging.getLogger(__name__)
 
 
 class TelegramUserAuthError(RuntimeError):
@@ -34,7 +38,7 @@ class TelegramUserAuthService:
         self._api = api or TelegramUserApi(self._settings)
         self._crypto = TelegramSessionCrypto(self._settings)
 
-    async def start(self, user_id: int, phone: str) -> dict[str, str]:
+    async def start(self, user_id: int, phone: str) -> dict[str, object]:
         if not phone.strip():
             raise TelegramUserAuthError("Phone number is required")
         now = datetime.now(timezone.utc)
@@ -50,13 +54,22 @@ class TelegramUserAuthService:
                     code="phone_code_hash_missing",
                 )
             session = client.session.save()
-            delivery = self._delivery_type(sent_code)
+            sent_code_metadata = self._api.sent_code_metadata(sent_code)
+            logger.info(
+                "Telegram auth code request accepted: sent_code_type=%s next_type=%s timeout=%s phone_code_hash_present=%s",
+                sent_code_metadata["telegram_sent_code_type"],
+                sent_code_metadata["telegram_next_type"],
+                sent_code_metadata["telegram_timeout"],
+                sent_code_metadata["phone_code_hash_present"],
+            )
         except TelegramUserAuthError:
             raise
         except TelegramUserApiError as error:
+            logger.info("Telegram auth code request failed: rpc_error_class=%s", error.__cause__.__class__.__name__ if error.__cause__ else error.__class__.__name__)
             raise TelegramUserAuthError(str(error), code=error.code, retry_after=error.retry_after) from error
         except Exception as error:
             translated = translate_telegram_error(error, "requesting the login code")
+            logger.info("Telegram auth code request failed: rpc_error_class=%s", error.__class__.__name__)
             raise TelegramUserAuthError(str(translated), code=translated.code, retry_after=translated.retry_after) from error
         finally:
             await client.disconnect()
@@ -64,7 +77,11 @@ class TelegramUserAuthService:
             db.query(TelegramAuthFlow).filter(
                 TelegramAuthFlow.user_id == user_id,
                 TelegramAuthFlow.expires_at > now,
-            ).update({TelegramAuthFlow.status: "cancelled"})
+            ).update({
+                TelegramAuthFlow.status: "cancelled",
+                TelegramAuthFlow.session_ciphertext: None,
+                TelegramAuthFlow.phone_code_hash_ciphertext: None,
+            })
             db.add(TelegramAuthFlow(
                 id=flow_id,
                 user_id=user_id,
@@ -75,7 +92,7 @@ class TelegramUserAuthService:
                 expires_at=now + timedelta(seconds=self._settings.telegram_user_auth_flow_ttl_seconds),
             ))
             db.commit()
-        return {"flow_id": str(flow_id), "status": "code_required", "delivery": delivery}
+        return {"flow_id": str(flow_id), "status": "code_required", **sent_code_metadata}
 
     async def submit_code(self, user_id: int, flow_id: UUID, code: str) -> dict[str, str]:
         flow = self._load_flow(user_id, flow_id)
@@ -217,14 +234,3 @@ class TelegramUserAuthService:
             account.session_ciphertext = None
             db.commit()
             return True
-
-    @staticmethod
-    def _delivery_type(sent_code) -> str:
-        """Return a non-sensitive description of Telegram's selected delivery channel."""
-        delivery = getattr(getattr(sent_code, "type", None), "__class__", type(None)).__name__
-        return {
-            "SentCodeTypeApp": "telegram_app",
-            "SentCodeTypeSms": "sms",
-            "SentCodeTypeCall": "phone_call",
-            "SentCodeTypeFlashCall": "flash_call",
-        }.get(delivery, "telegram")

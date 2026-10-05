@@ -58,6 +58,30 @@ class TelegramUserApiTestCase(unittest.TestCase):
         self.assertFalse(messages[0]["out"])
         self.assertEqual(messages[0]["text"], "hello")
 
+    def test_sent_code_app_metadata_is_safe_and_explicit(self) -> None:
+        # Use named classes to mirror Telethon TL constructor names.
+        SentCodeTypeApp = type("SentCodeTypeApp", (), {})
+        CodeTypeSms = type("CodeTypeSms", (), {})
+        sent = SimpleNamespace(type=SentCodeTypeApp(), next_type=CodeTypeSms(), timeout=120, phone_code_hash="secret-hash")
+        metadata = TelegramUserApi.sent_code_metadata(sent)
+        self.assertEqual(metadata["delivery"], "telegram_app")
+        self.assertEqual(metadata["telegram_sent_code_type"], "SentCodeTypeApp")
+        self.assertEqual(metadata["telegram_next_type"], "CodeTypeSms")
+        self.assertEqual(metadata["telegram_timeout"], 120)
+        self.assertTrue(metadata["phone_code_hash_present"])
+        self.assertNotIn("phone_code_hash", metadata)
+        self.assertNotIn("secret-hash", str(metadata))
+
+    def test_sent_code_sms_and_unknown_metadata(self) -> None:
+        SentCodeTypeSms = type("SentCodeTypeSms", (), {})
+        sent = SimpleNamespace(type=SentCodeTypeSms(), next_type=None, timeout=None, phone_code_hash=None)
+        metadata = TelegramUserApi.sent_code_metadata(sent)
+        self.assertEqual(metadata["delivery"], "sms")
+        self.assertEqual(metadata["telegram_sent_code_type"], "SentCodeTypeSms")
+        self.assertIsNone(metadata["telegram_next_type"])
+        self.assertIsNone(metadata["telegram_timeout"])
+        self.assertFalse(metadata["phone_code_hash_present"])
+
     def test_start_persists_phone_code_hash_and_reports_delivery(self) -> None:
         class FakeSession:
             def save(self):
@@ -105,14 +129,21 @@ class TelegramUserApiTestCase(unittest.TestCase):
             def client(self, session=None):
                 return FakeClient()
 
+            sent_code_metadata = staticmethod(TelegramUserApi.sent_code_metadata)
+
         service = TelegramUserAuthService(self.settings, api=FakeApi())
-        with patch("app.services.telegram_user_auth.SessionLocal", FakeDb):
+        with patch("app.services.telegram_user_auth.SessionLocal", FakeDb), patch(
+            "app.services.telegram_user_auth.logger.info"
+        ) as log_info:
             result = asyncio.run(service.start(7, "+15551234567"))
         self.assertEqual(result["status"], "code_required")
         self.assertEqual(len(FakeDb.added), 1)
         flow = FakeDb.added[0]
         self.assertNotEqual(flow.phone_code_hash_ciphertext, "hash-from-telegram")
         self.assertEqual(service._crypto.decrypt(flow.phone_code_hash_ciphertext), "hash-from-telegram")
+        logged = repr(log_info.call_args_list)
+        self.assertNotIn("+15551234567", logged)
+        self.assertNotIn("hash-from-telegram", logged)
 
     def test_submit_code_reuses_persisted_phone_code_hash(self) -> None:
         class FakeSession:

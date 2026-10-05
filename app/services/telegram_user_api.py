@@ -79,6 +79,29 @@ class TelegramUserApi:
         return self._factory()(StringSession(session), api_id, api_hash)
 
     @staticmethod
+    def sent_code_metadata(sent_code: Any) -> dict[str, str | int | bool | None]:
+        """Return safe metadata from Telethon's auth.SentCode response."""
+        sent_code_type = TelegramUserApi._type_name(getattr(sent_code, "type", None))
+        next_type = TelegramUserApi._type_name(getattr(sent_code, "next_type", None))
+        timeout = getattr(sent_code, "timeout", None)
+        return {
+            "delivery": {
+                "SentCodeTypeApp": "telegram_app",
+                "SentCodeTypeSms": "sms",
+                "SentCodeTypeCall": "phone_call",
+                "SentCodeTypeFlashCall": "flash_call",
+            }.get(sent_code_type, "telegram_unknown"),
+            "telegram_sent_code_type": sent_code_type,
+            "telegram_next_type": next_type,
+            "telegram_timeout": timeout if isinstance(timeout, int) else None,
+            "phone_code_hash_present": bool(getattr(sent_code, "phone_code_hash", None)),
+        }
+
+    @staticmethod
+    def _type_name(value: Any) -> str | None:
+        return value.__class__.__name__ if value is not None else None
+
+    @staticmethod
     def peer_from_entity(entity: Any) -> TelegramPeer:
         entity_id = getattr(entity, "id", None)
         if not isinstance(entity_id, int):
