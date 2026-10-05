@@ -17,6 +17,13 @@ from app.db.models.oauth import (
     OAuthRefreshToken,
 )
 from app.db.models.user import User, UserIdentity
+from app.db.models.telegram_user import (
+    TelegramAccount,
+    TelegramAllowedPeer,
+    TelegramAuthFlow,
+    TelegramDialogueMonitor,
+    TelegramSendRequest,
+)
 
 __all__ = [
     "Memory",
@@ -30,4 +37,9 @@ __all__ = [
     "OAuthRefreshToken",
     "NotificationOutbox",
     "TelegramNotificationSubscription",
+    "TelegramAccount",
+    "TelegramAuthFlow",
+    "TelegramAllowedPeer",
+    "TelegramDialogueMonitor",
+    "TelegramSendRequest",
 ]

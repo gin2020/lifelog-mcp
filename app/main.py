@@ -8,6 +8,7 @@ from app.tools import remember  # noqa: F401 - регистрация инстр
 from app.tools import system  # noqa: F401 - регистрация инструментов при импорте
 from app.tools import finance
 from app.tools import query_finance
+from app.tools import telegram_user  # noqa: F401 - Telegram User API tools
 
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")

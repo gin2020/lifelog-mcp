@@ -25,6 +25,15 @@ class Settings(BaseSettings):
     telegram_bot_username: str | None = None
     telegram_webhook_secret: SecretStr | None = None
     telegram_webhook_url: AnyHttpUrl | None = None
+    telegram_api_id: int | None = None
+    telegram_api_hash: SecretStr | None = None
+    telegram_session_encryption_key: SecretStr | None = None
+    telegram_user_worker_enabled: bool = False
+    telegram_user_poll_interval_seconds: float = 10.0
+    telegram_user_auth_flow_ttl_seconds: int = 600
+    telegram_send_confirmation_ttl_seconds: int = 300
+    telegram_max_monitored_dialogues_per_user: int = 10
+    telegram_max_messages_per_request: int = 100
     jwt_signing_key: SecretStr | None = None
     jwt_access_token_ttl_seconds: int = 3600
     oauth_refresh_token_ttl_seconds: int = 2_592_000
@@ -63,6 +72,40 @@ class Settings(BaseSettings):
                 "Authentication is enabled but required settings are missing: "
                 + ", ".join(missing)
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_telegram_user_api_settings(self) -> "Settings":
+        """Validate MTProto settings only when the user API is enabled."""
+        configured = any(
+            value is not None
+            for value in (
+                self.telegram_api_id,
+                self.telegram_api_hash,
+                self.telegram_session_encryption_key,
+            )
+        )
+        if not configured:
+            return self
+        missing = []
+        if self.telegram_api_id is None:
+            missing.append("TELEGRAM_API_ID")
+        if self.telegram_api_hash is None:
+            missing.append("TELEGRAM_API_HASH")
+        if self.telegram_session_encryption_key is None:
+            missing.append("TELEGRAM_SESSION_ENCRYPTION_KEY")
+        if missing:
+            raise ValueError("Telegram User API settings are incomplete: " + ", ".join(missing))
+        if self.telegram_api_id <= 0:
+            raise ValueError("TELEGRAM_API_ID must be positive")
+        if self.telegram_user_poll_interval_seconds <= 0:
+            raise ValueError("TELEGRAM_USER_POLL_INTERVAL_SECONDS must be positive")
+        if self.telegram_user_auth_flow_ttl_seconds <= 0:
+            raise ValueError("TELEGRAM_USER_AUTH_FLOW_TTL_SECONDS must be positive")
+        if self.telegram_send_confirmation_ttl_seconds <= 0:
+            raise ValueError("TELEGRAM_SEND_CONFIRMATION_TTL_SECONDS must be positive")
+        if self.telegram_max_messages_per_request <= 0:
+            raise ValueError("TELEGRAM_MAX_MESSAGES_PER_REQUEST must be positive")
         return self
 
     @model_validator(mode="after")
