@@ -5,9 +5,39 @@ from typing import Any, Callable
 
 from app.config.settings import Settings, get_settings
 
-
 class TelegramUserApiError(RuntimeError):
     """Safe application error for Telegram User API operations."""
+
+    def __init__(self, message: str, *, code: str = "telegram_error", retry_after: int | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retry_after = retry_after
+
+
+def translate_telegram_error(error: Exception, operation: str) -> TelegramUserApiError:
+    """Convert Telethon RPC errors into safe, actionable application errors."""
+    name = error.__class__.__name__
+    retry_after = getattr(error, "seconds", None) if name == "FloodWaitError" else None
+    messages = {
+        "PhoneNumberInvalidError": ("phone_number_invalid", "Telegram rejected the phone number. Use international format, for example +15551234567."),
+        "PhoneNumberBannedError": ("phone_number_banned", "This phone number is banned by Telegram."),
+        "PhoneNumberUnoccupiedError": ("phone_number_not_registered", "This phone number is not registered in Telegram."),
+        "PhoneNumberFloodError": ("phone_number_flood", "Too many login attempts were made for this phone number. Try again later."),
+        "PhoneCodeInvalidError": ("phone_code_invalid", "The Telegram login code is invalid. Request a new code if needed."),
+        "PhoneCodeExpiredError": ("phone_code_expired", "The Telegram login code expired. Start a new connection flow."),
+        "PhoneCodeEmptyError": ("phone_code_empty", "The Telegram login code is empty."),
+        "PhoneCodeHashEmptyError": ("phone_code_hash_missing", "The Telegram login flow lost its code state. Start a new connection flow."),
+        "SessionPasswordNeededError": ("session_password_required", "Telegram requires the account's two-factor password."),
+        "PasswordHashInvalidError": ("password_invalid", "The Telegram two-factor password is invalid."),
+        "FloodWaitError": ("flood_wait", f"Telegram temporarily rate-limited this operation. Retry after {retry_after or 0} seconds."),
+        "AuthKeyUnregisteredError": ("session_invalid", "The Telegram session is no longer valid. Start a new connection flow."),
+        "AuthRestartError": ("auth_restart", "Telegram restarted authorization. Start a new connection flow."),
+        "ApiIdInvalidError": ("api_id_invalid", "Telegram API ID/API hash are invalid."),
+        "ApiIdPublishedFloodError": ("api_id_flood", "Telegram rejected this API application because of excessive API usage."),
+        "UserDeactivatedBanError": ("user_deactivated", "The Telegram account is deactivated or banned."),
+    }
+    code, message = messages.get(name, ("telegram_error", f"Telegram authorization failed during {operation}."))
+    return TelegramUserApiError(message, code=code, retry_after=retry_after)
 
 
 @dataclass(frozen=True)

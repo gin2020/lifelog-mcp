@@ -3,6 +3,8 @@
 import asyncio
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
+from uuid import uuid4
 
 from cryptography.fernet import Fernet
 from pydantic import SecretStr
@@ -10,6 +12,9 @@ from pydantic import SecretStr
 from app.config.settings import Settings
 from app.services.telegram_session_crypto import TelegramSessionCrypto
 from app.services.telegram_user_api import TelegramUserApi
+from app.services.telegram_user_api import translate_telegram_error
+from app.services.telegram_user_auth import TelegramUserAuthService, TelegramUserAuthError
+from telethon.errors import PhoneCodeInvalidError, SessionPasswordNeededError
 
 
 class TelegramUserApiTestCase(unittest.TestCase):
@@ -52,6 +57,145 @@ class TelegramUserApiTestCase(unittest.TestCase):
         self.assertEqual(messages[0]["id"], 7)
         self.assertFalse(messages[0]["out"])
         self.assertEqual(messages[0]["text"], "hello")
+
+    def test_start_persists_phone_code_hash_and_reports_delivery(self) -> None:
+        class FakeSession:
+            def save(self):
+                return "intermediate-session"
+
+        class FakeClient:
+            session = FakeSession()
+
+            async def connect(self):
+                pass
+
+            async def disconnect(self):
+                pass
+
+            async def send_code_request(self, phone):
+                self.phone = phone
+                return SimpleNamespace(phone_code_hash="hash-from-telegram", type=SimpleNamespace())
+
+        class FakeQuery:
+            def filter(self, *args):
+                return self
+
+            def update(self, values):
+                return 0
+
+        class FakeDb:
+            added = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def query(self, model):
+                return FakeQuery()
+
+            def add(self, value):
+                self.added.append(value)
+
+            def commit(self):
+                pass
+
+        class FakeApi:
+            def client(self, session=None):
+                return FakeClient()
+
+        service = TelegramUserAuthService(self.settings, api=FakeApi())
+        with patch("app.services.telegram_user_auth.SessionLocal", FakeDb):
+            result = asyncio.run(service.start(7, "+15551234567"))
+        self.assertEqual(result["status"], "code_required")
+        self.assertEqual(len(FakeDb.added), 1)
+        flow = FakeDb.added[0]
+        self.assertNotEqual(flow.phone_code_hash_ciphertext, "hash-from-telegram")
+        self.assertEqual(service._crypto.decrypt(flow.phone_code_hash_ciphertext), "hash-from-telegram")
+
+    def test_submit_code_reuses_persisted_phone_code_hash(self) -> None:
+        class FakeSession:
+            def save(self):
+                return "updated-session"
+
+        class FakeClient:
+            session = FakeSession()
+            received = None
+
+            async def connect(self):
+                pass
+
+            async def disconnect(self):
+                pass
+
+            async def sign_in(self, **kwargs):
+                self.received = kwargs
+
+        class FakeApi:
+            client_instance = FakeClient()
+
+            def client(self, session=None):
+                return self.client_instance
+
+        service = TelegramUserAuthService(self.settings, api=FakeApi())
+        flow = SimpleNamespace(
+            session_ciphertext=service._crypto.encrypt("intermediate-session"),
+            phone_code_hash_ciphertext=service._crypto.encrypt("hash-from-telegram"),
+            phone="+15551234567",
+            status="code_required",
+        )
+        with patch.object(service, "_load_flow", return_value=flow), patch.object(
+            service, "_finish", return_value={"status": "connected"}
+        ) as finish:
+            result = asyncio.run(service.submit_code(7, uuid4(), "12345"))
+        self.assertEqual(result["status"], "connected")
+        self.assertEqual(FakeApi.client_instance.received["phone_code_hash"], "hash-from-telegram")
+        finish.assert_called_once()
+
+    def test_session_password_needed_preserves_intermediate_state(self) -> None:
+        class FakeSession:
+            def save(self):
+                return "password-session"
+
+        class FakeClient:
+            session = FakeSession()
+
+            async def connect(self):
+                pass
+
+            async def disconnect(self):
+                pass
+
+            async def sign_in(self, **kwargs):
+                raise SessionPasswordNeededError(None)
+
+        class FakeApi:
+            def client(self, session=None):
+                return FakeClient()
+
+        service = TelegramUserAuthService(self.settings, api=FakeApi())
+        flow = SimpleNamespace(
+            session_ciphertext=service._crypto.encrypt("intermediate-session"),
+            phone_code_hash_ciphertext=service._crypto.encrypt("hash-from-telegram"),
+            phone="+15551234567",
+            status="code_required",
+        )
+        with patch.object(service, "_load_flow", return_value=flow), patch.object(service, "_update_flow") as update:
+            result = asyncio.run(service.submit_code(7, uuid4(), "12345"))
+        self.assertEqual(result["status"], "password_required")
+        update.assert_called_once()
+        self.assertEqual(update.call_args.args[1], "password_required")
+
+    def test_telegram_error_mapping_does_not_include_secrets(self) -> None:
+        error = translate_telegram_error(PhoneCodeInvalidError(None), "checking the login code")
+        self.assertEqual(error.code, "phone_code_invalid")
+        self.assertIn("invalid", str(error).lower())
+        self.assertNotIn("12345", str(error))
+
+    def test_auth_error_has_machine_readable_reason(self) -> None:
+        error = TelegramUserAuthError("The code is invalid", code="phone_code_invalid")
+        self.assertEqual(str(error), "[phone_code_invalid] The code is invalid")
 
 
 if __name__ == "__main__":

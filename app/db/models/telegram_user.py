@@ -39,6 +39,7 @@ class TelegramAuthFlow(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     phone: Mapped[str] = mapped_column(String(32), nullable=False)
     session_ciphertext: Mapped[str | None] = mapped_column(Text)
+    phone_code_hash_ciphertext: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'code_required'"), index=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
