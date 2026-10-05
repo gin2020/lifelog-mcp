@@ -1,14 +1,9 @@
 """Small Telethon adapter for per-user Telegram MTProto sessions."""
 
-import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Callable
 
 from app.config.settings import Settings, get_settings
-
-from telethon import events
-from telethon import functions, types
 
 class TelegramUserApiError(RuntimeError):
     """Safe application error for Telegram User API operations."""
@@ -112,52 +107,6 @@ class TelegramUserApi:
             return await client.qr_login()
         except Exception as error:
             raise translate_telegram_error(error, "starting QR authorization") from error
-
-    @staticmethod
-    async def import_qr_token(client: Any, token: bytes) -> dict[str, Any]:
-        """Import a QR token, including Telethon's official DC migration path."""
-        try:
-            response = await client(functions.auth.ImportLoginTokenRequest(token))
-            if isinstance(response, types.auth.LoginTokenMigrateTo):
-                await client._switch_dc(response.dc_id)
-                response = await client(functions.auth.ImportLoginTokenRequest(response.token))
-            if isinstance(response, types.auth.LoginTokenSuccess):
-                user = response.authorization.user
-                await client._on_login(user)
-                return {"status": "connected", "user": user}
-            if isinstance(response, types.auth.LoginToken):
-                return {"status": "pending", "token": response.token, "expires": response.expires}
-            raise TelegramUserApiError("Telegram returned an unexpected QR login response", code="qr_unexpected_response")
-        except TelegramUserApiError:
-            raise
-        except Exception as error:
-            raise translate_telegram_error(error, "checking QR authorization") from error
-
-    @staticmethod
-    async def wait_for_qr_login(client: Any, token: bytes, expires_at: datetime | None, timeout: float) -> dict[str, Any]:
-        """Wait for Telegram's UpdateLoginToken before importing the QR token.
-
-        Telethon's official QRLogin.wait follows this sequence. Importing the
-        token immediately before the scan can produce AUTH_TOKEN_EXPIRED.
-        """
-        event_received = asyncio.Event()
-
-        async def handler(_update: Any) -> None:
-            event_received.set()
-
-        client.add_event_handler(handler, events.Raw(types.UpdateLoginToken))
-        try:
-            wait_timeout = timeout
-            if expires_at is not None:
-                wait_timeout = min(wait_timeout, max(0.0, (expires_at - datetime.now(timezone.utc)).total_seconds()))
-            try:
-                await asyncio.wait_for(event_received.wait(), timeout=wait_timeout)
-            except asyncio.TimeoutError:
-                return {"status": "pending"}
-        finally:
-            client.remove_event_handler(handler)
-
-        return await TelegramUserApi.import_qr_token(client, token)
 
     @staticmethod
     def _type_name(value: Any) -> str | None:

@@ -31,7 +31,6 @@ class Settings(BaseSettings):
     telegram_user_worker_enabled: bool = False
     telegram_user_poll_interval_seconds: float = 10.0
     telegram_user_auth_flow_ttl_seconds: int = 600
-    telegram_qr_wait_timeout_seconds: float = 30.0
     telegram_send_confirmation_ttl_seconds: int = 300
     telegram_max_monitored_dialogues_per_user: int = 10
     telegram_max_messages_per_request: int = 100
@@ -103,8 +102,6 @@ class Settings(BaseSettings):
             raise ValueError("TELEGRAM_USER_POLL_INTERVAL_SECONDS must be positive")
         if self.telegram_user_auth_flow_ttl_seconds <= 0:
             raise ValueError("TELEGRAM_USER_AUTH_FLOW_TTL_SECONDS must be positive")
-        if self.telegram_qr_wait_timeout_seconds <= 0:
-            raise ValueError("TELEGRAM_QR_WAIT_TIMEOUT_SECONDS must be positive")
         if self.telegram_send_confirmation_ttl_seconds <= 0:
             raise ValueError("TELEGRAM_SEND_CONFIRMATION_TTL_SECONDS must be positive")
         if self.telegram_max_messages_per_request <= 0:

@@ -31,7 +31,7 @@ class TelegramAccount(Base):
 
 
 class TelegramAuthFlow(Base):
-    """Short-lived state for staged phone/code authentication."""
+    """Short-lived durable state; live QRLogin objects never enter the database."""
 
     __tablename__ = "telegram_auth_flows"
 
@@ -40,7 +40,6 @@ class TelegramAuthFlow(Base):
     phone: Mapped[str | None] = mapped_column(String(32))
     session_ciphertext: Mapped[str | None] = mapped_column(Text)
     phone_code_hash_ciphertext: Mapped[str | None] = mapped_column(Text)
-    qr_token_ciphertext: Mapped[str | None] = mapped_column(Text)
     qr_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'code_required'"), index=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))

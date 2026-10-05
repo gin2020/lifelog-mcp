@@ -33,7 +33,7 @@ async def telegram_connect(operation: str, phone: str | None = None, flow_id: st
         if operation == "qr_status":
             return await service.qr_status(user_id, parsed)
         if operation == "cancel":
-            return {"flow_id": flow_id, "status": "cancelled" if service.cancel(user_id, parsed) else "not_found"}
+            return {"flow_id": flow_id, "status": "cancelled" if await service.cancel(user_id, parsed) else "not_found"}
         if operation == "submit_code":
             if code is None:
                 raise TelegramUserAuthError("code is required")
@@ -42,7 +42,9 @@ async def telegram_connect(operation: str, phone: str | None = None, flow_id: st
             if password is None:
                 raise TelegramUserAuthError("password is required")
             return await service.submit_2fa(user_id, parsed, password)
-        raise TelegramUserAuthError("operation must be start, submit_code, or submit_2fa")
+        raise TelegramUserAuthError(
+            "operation must be start, submit_code, submit_2fa, qr_start, qr_status, or cancel"
+        )
     except (TelegramUserAuthError, ValueError) as error:
         raise RuntimeError(str(error)) from error
 
