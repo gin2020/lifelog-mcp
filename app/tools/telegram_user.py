@@ -25,9 +25,13 @@ async def telegram_connect(operation: str, phone: str | None = None, flow_id: st
             if phone is None:
                 raise TelegramUserAuthError("phone is required for start")
             return await service.start(user_id, phone)
+        if operation == "qr_start":
+            return await service.qr_start(user_id)
         if flow_id is None:
             raise TelegramUserAuthError("flow_id is required")
         parsed = UUID(flow_id)
+        if operation == "qr_status":
+            return await service.qr_status(user_id, parsed)
         if operation == "cancel":
             return {"flow_id": flow_id, "status": "cancelled" if service.cancel(user_id, parsed) else "not_found"}
         if operation == "submit_code":

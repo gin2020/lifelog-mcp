@@ -81,6 +81,8 @@ class TelegramUserAuthService:
                 TelegramAuthFlow.status: "cancelled",
                 TelegramAuthFlow.session_ciphertext: None,
                 TelegramAuthFlow.phone_code_hash_ciphertext: None,
+                TelegramAuthFlow.qr_token_ciphertext: None,
+                TelegramAuthFlow.qr_expires_at: None,
             })
             db.add(TelegramAuthFlow(
                 id=flow_id,
@@ -93,6 +95,106 @@ class TelegramUserAuthService:
             ))
             db.commit()
         return {"flow_id": str(flow_id), "status": "code_required", **sent_code_metadata}
+
+    async def qr_start(self, user_id: int) -> dict[str, object]:
+        """Start official Telegram QR authorization and return only its display URL."""
+        now = datetime.now(timezone.utc)
+        flow_id = uuid4()
+        client = self._api.client()
+        try:
+            await client.connect()
+            qr_login = await self._api.qr_login(client)
+            token = qr_login.token
+            qr_url = qr_login.url
+            expires_at = qr_login.expires
+            session = client.session.save()
+            if not isinstance(token, bytes) or not token:
+                raise TelegramUserAuthError("Telegram did not return a QR login token", code="qr_token_missing")
+        except TelegramUserAuthError:
+            raise
+        except TelegramUserApiError as error:
+            logger.info("Telegram QR auth start failed: rpc_error_class=%s", error.__cause__.__class__.__name__ if error.__cause__ else error.__class__.__name__)
+            raise TelegramUserAuthError(str(error), code=error.code, retry_after=error.retry_after) from error
+        except Exception as error:
+            translated = translate_telegram_error(error, "starting QR authorization")
+            logger.info("Telegram QR auth start failed: rpc_error_class=%s", error.__class__.__name__)
+            raise TelegramUserAuthError(str(translated), code=translated.code, retry_after=translated.retry_after) from error
+        finally:
+            await client.disconnect()
+        with SessionLocal() as db:
+            db.query(TelegramAuthFlow).filter(
+                TelegramAuthFlow.user_id == user_id,
+                TelegramAuthFlow.expires_at > now,
+            ).update({
+                TelegramAuthFlow.status: "cancelled",
+                TelegramAuthFlow.session_ciphertext: None,
+                TelegramAuthFlow.phone_code_hash_ciphertext: None,
+                TelegramAuthFlow.qr_token_ciphertext: None,
+                TelegramAuthFlow.qr_expires_at: None,
+            })
+            db.add(TelegramAuthFlow(
+                id=flow_id,
+                user_id=user_id,
+                phone=None,
+                session_ciphertext=self._crypto.encrypt(session),
+                qr_token_ciphertext=self._crypto.encrypt(token.hex()),
+                qr_expires_at=expires_at,
+                status="qr_code_required",
+                expires_at=expires_at,
+            ))
+            db.commit()
+        logger.info("Telegram QR auth state created: expires_at=%s", expires_at.isoformat())
+        return {"flow_id": str(flow_id), "status": "qr_code_required", "qr_url": qr_url, "expires_at": expires_at.isoformat()}
+
+    async def qr_status(self, user_id: int, flow_id: UUID) -> dict[str, object]:
+        """Poll official QR login state without logging or returning the token."""
+        flow = self._load_flow(user_id, flow_id)
+        if flow.status == "password_required":
+            return {"flow_id": str(flow_id), "status": "password_required"}
+        if flow.status != "qr_code_required" or not flow.qr_token_ciphertext:
+            raise TelegramUserAuthError("This flow is not an active QR authorization", code="qr_flow_invalid")
+        if flow.qr_expires_at is not None and flow.qr_expires_at <= datetime.now(timezone.utc):
+            self._expire_flow(flow_id)
+            raise TelegramUserAuthError("The QR code expired. Start a new QR connection flow.", code="qr_expired")
+        client = self._api.client(self._crypto.decrypt(flow.session_ciphertext or ""))
+        try:
+            await client.connect()
+            token = bytes.fromhex(self._crypto.decrypt(flow.qr_token_ciphertext))
+            result = await self._api.wait_for_qr_login(
+                client,
+                token,
+                flow.qr_expires_at,
+                self._settings.telegram_qr_wait_timeout_seconds,
+            )
+            if result["status"] == "pending":
+                session = client.session.save()
+                expires_at = result.get("expires") or flow.qr_expires_at
+                next_token = result.get("token")
+                token_ciphertext = (
+                    self._crypto.encrypt(next_token.hex())
+                    if isinstance(next_token, bytes)
+                    else flow.qr_token_ciphertext
+                )
+                self._update_qr_flow(flow_id, self._crypto.encrypt(session), token_ciphertext, expires_at)
+                return {"flow_id": str(flow_id), "status": "qr_code_required", "expires_at": expires_at.isoformat() if expires_at else None}
+            return await self._finish(user_id, flow_id, client)
+        except TelegramUserApiError as error:
+            if error.code == "session_password_required":
+                self._update_flow(flow_id, "password_required", self._crypto.encrypt(client.session.save()))
+                return {"flow_id": str(flow_id), "status": "password_required"}
+            if error.code == "qr_expired":
+                self._expire_flow(flow_id)
+            raise TelegramUserAuthError(str(error), code=error.code, retry_after=error.retry_after) from error
+        except Exception as error:
+            translated = translate_telegram_error(error, "checking QR authorization")
+            if translated.code == "session_password_required":
+                self._update_flow(flow_id, "password_required", self._crypto.encrypt(client.session.save()))
+                return {"flow_id": str(flow_id), "status": "password_required"}
+            if translated.code == "qr_expired":
+                self._expire_flow(flow_id)
+            raise TelegramUserAuthError(str(translated), code=translated.code, retry_after=translated.retry_after) from error
+        finally:
+            await client.disconnect()
 
     async def submit_code(self, user_id: int, flow_id: UUID, code: str) -> dict[str, str]:
         flow = self._load_flow(user_id, flow_id)
@@ -151,6 +253,8 @@ class TelegramUserAuthService:
             flow.status = "cancelled"
             flow.session_ciphertext = None
             flow.phone_code_hash_ciphertext = None
+            flow.qr_token_ciphertext = None
+            flow.qr_expires_at = None
             db.commit()
             return True
 
@@ -186,6 +290,8 @@ class TelegramUserAuthService:
                 flow.status = "expired"
                 flow.session_ciphertext = None
                 flow.phone_code_hash_ciphertext = None
+                flow.qr_token_ciphertext = None
+                flow.qr_expires_at = None
                 db.commit()
 
     async def _finish(self, user_id: int, flow_id: UUID, client) -> dict[str, str]:
@@ -215,6 +321,8 @@ class TelegramUserAuthService:
                 flow.status = "completed"
                 flow.session_ciphertext = None
                 flow.phone_code_hash_ciphertext = None
+                flow.qr_token_ciphertext = None
+                flow.qr_expires_at = None
             db.commit()
         return {"flow_id": str(flow_id), "status": "connected", "telegram_user_id": str(telegram_user_id), "display_name": display_name}
 
@@ -234,3 +342,13 @@ class TelegramUserAuthService:
             account.session_ciphertext = None
             db.commit()
             return True
+
+    def _update_qr_flow(self, flow_id: UUID, session_ciphertext: str, token_ciphertext: str, expires_at) -> None:
+        with SessionLocal() as db:
+            flow = db.get(TelegramAuthFlow, flow_id)
+            if flow is not None:
+                flow.session_ciphertext = session_ciphertext
+                flow.qr_token_ciphertext = token_ciphertext
+                flow.qr_expires_at = expires_at
+                flow.expires_at = expires_at
+                db.commit()

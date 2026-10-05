@@ -15,6 +15,7 @@ from app.services.telegram_user_api import TelegramUserApi
 from app.services.telegram_user_api import translate_telegram_error
 from app.services.telegram_user_auth import TelegramUserAuthService, TelegramUserAuthError
 from telethon.errors import PhoneCodeInvalidError, SessionPasswordNeededError
+from telethon.tl import types as tl_types
 
 
 class TelegramUserApiTestCase(unittest.TestCase):
@@ -81,6 +82,129 @@ class TelegramUserApiTestCase(unittest.TestCase):
         self.assertIsNone(metadata["telegram_next_type"])
         self.assertIsNone(metadata["telegram_timeout"])
         self.assertFalse(metadata["phone_code_hash_present"])
+
+    def test_qr_import_reports_pending_without_exposing_token(self) -> None:
+        token = b"qr-secret-token"
+
+        class FakeClient:
+            async def __call__(self, request):
+                return tl_types.auth.LoginToken(expires=None, token=token)
+
+        result = asyncio.run(TelegramUserApi.import_qr_token(FakeClient(), token))
+        self.assertEqual(result["status"], "pending")
+        self.assertEqual(result["token"], token)
+
+    def test_qr_wait_returns_pending_without_importing_before_scan(self) -> None:
+        class FakeClient:
+            handlers = []
+
+            def add_event_handler(self, handler, event):
+                self.handlers.append((handler, event))
+
+            def remove_event_handler(self, handler):
+                self.handlers = [(item, event) for item, event in self.handlers if item != handler]
+
+        result = asyncio.run(TelegramUserApi.wait_for_qr_login(FakeClient(), b"qr-token", None, 0.001))
+        self.assertEqual(result, {"status": "pending"})
+
+    def test_qr_start_result_contains_url_but_no_qr_token_in_logs(self) -> None:
+        class FakeSession:
+            def save(self):
+                return "qr-session"
+
+        class FakeQrLogin:
+            token = b"qr-secret-token"
+            url = "tg://login?token=qr-secret-token"
+            expires = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+
+        class FakeClient:
+            session = FakeSession()
+
+            async def connect(self):
+                pass
+
+            async def disconnect(self):
+                pass
+
+        class FakeApi:
+            def client(self, session=None):
+                return FakeClient()
+
+            async def qr_login(self, client):
+                return FakeQrLogin()
+
+        class FakeQuery:
+            def filter(self, *args):
+                return self
+
+            def update(self, values):
+                return 0
+
+        class FakeDb:
+            added = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def query(self, model):
+                return FakeQuery()
+
+            def add(self, value):
+                self.added.append(value)
+
+            def commit(self):
+                pass
+
+        from app.services.telegram_user_auth import TelegramUserAuthService
+
+        service = TelegramUserAuthService(self.settings, api=FakeApi())
+        with patch("app.services.telegram_user_auth.SessionLocal", FakeDb), patch(
+            "app.services.telegram_user_auth.logger.info"
+        ) as log_info:
+            result = asyncio.run(service.qr_start(7))
+        self.assertEqual(result["status"], "qr_code_required")
+        self.assertIn("qr_url", result)
+        self.assertNotIn("qr-secret-token", repr(log_info.call_args_list))
+
+    def test_qr_status_keeps_token_when_wait_times_out(self) -> None:
+        class FakeSession:
+            def save(self):
+                return "qr-session-updated"
+
+        class FakeClient:
+            session = FakeSession()
+
+            async def connect(self):
+                pass
+
+            async def disconnect(self):
+                pass
+
+        class FakeApi:
+            def client(self, session=None):
+                return FakeClient()
+
+            async def wait_for_qr_login(self, client, token, expires_at, timeout):
+                return {"status": "pending"}
+
+        from datetime import datetime, timedelta, timezone
+        from app.services.telegram_user_auth import TelegramUserAuthService
+
+        service = TelegramUserAuthService(self.settings, api=FakeApi())
+        flow_id = uuid4()
+        flow = SimpleNamespace(
+            status="qr_code_required",
+            session_ciphertext=service._crypto.encrypt("qr-session"),
+            qr_token_ciphertext=service._crypto.encrypt("71722d746f6b656e"),
+            qr_expires_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+        )
+        with patch.object(service, "_load_flow", return_value=flow), patch.object(service, "_update_qr_flow") as update:
+            result = asyncio.run(service.qr_status(7, flow_id))
+        self.assertEqual(result["status"], "qr_code_required")
+        self.assertEqual(update.call_args.args[2], flow.qr_token_ciphertext)
 
     def test_start_persists_phone_code_hash_and_reports_delivery(self) -> None:
         class FakeSession:
