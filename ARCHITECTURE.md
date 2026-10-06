@@ -415,6 +415,176 @@ Telegram имеет две независимые роли.
 
 ---
 
+## 13. Telegram architecture
+
+Telegram is intentionally split into three independent roles:
+
+1. **Telegram OIDC** — user identity for LifeLog OAuth.
+2. **Telegram Bot API** — system notification delivery.
+3. **Telegram User API / MTProto** — access to the user's own Telegram account.
+
+The third subsystem is a personal-account integration rather than a bot integration. It uses Telethon and an encrypted MTProto session associated with the LifeLog user.
+
+### 13.1. Personal Telegram account
+
+The authenticated Telegram account is stored as `TelegramAccount`, one active account per LifeLog user in the current implementation.
+
+```text
+LifeLog user
+    ↓
+TelegramAccount
+    ├── telegram_user_id
+    ├── username / display_name
+    └── encrypted MTProto session
+            ↓
+       Telethon client
+            ↓
+       Telegram network
+```
+
+The raw MTProto session is never stored in plaintext. Session material is encrypted before persistence. Telegram credentials are therefore kept server-side and are not exposed through MCP tool arguments.
+
+### 13.2. Authentication flow
+
+Two staged authorization paths are supported:
+
+- phone/code authentication;
+- official Telegram QR login.
+
+QR login uses Telethon's `QRLogin` flow. The live QR runtime object and its token remain process-local; the database stores only the short-lived durable authorization state needed to complete the flow. After successful authorization the resulting MTProto session is encrypted and persisted.
+
+```text
+MCP client
+    ↓
+telegram_connect
+    ↓
+QR / phone authorization
+    ↓
+Telethon session
+    ↓
+encrypted MTProto session
+    ↓
+TelegramAccount
+```
+
+### 13.3. Explicit contact allowlist
+
+Personal-account operations are not exposed as unrestricted access to the user's entire Telegram history.
+
+A peer must first be explicitly allowlisted in `telegram_allowed_peers`.
+
+Stable identity is based on:
+
+```text
+peer_type + telegram_peer_id
+```
+
+rather than on a display name.
+
+Contact discovery is performed by `telegram_search_contacts`, which can resolve a user by phone, username, Telegram ID, or contact name. Search results expose the stable Telegram peer ID so that contacts without a username can still be safely allowlisted.
+
+```text
+telegram_search_contacts
+        ↓
+resolved peer
+        ↓
+telegram_add_allowed_contact
+        ↓
+telegram_allowed_peers
+        ↓
+read / monitor / send
+```
+
+### 13.4. Reading messages
+
+Two read paths are deliberately separated:
+
+- `telegram_get_messages` — explicit history read for one allowlisted peer, optionally starting after a message ID;
+- `telegram_get_new_messages` — reads new inbound messages only from active dialogue monitors and advances a stored watermark.
+
+Outgoing messages are filtered from the "new messages" result.
+
+Monitoring is bounded to explicitly allowlisted peers. The architecture does not perform a global scan of all Telegram dialogs.
+
+### 13.5. Monitoring model
+
+`TelegramDialogueMonitor` stores the monitor state for one allowlisted peer.
+
+```text
+telegram_start_monitoring
+        ↓
+TelegramDialogueMonitor
+        ├── monitor_kind
+        ├── anchor_message_id
+        ├── last_read_message_id
+        └── is_active
+```
+
+Supported monitor kinds are currently `new_messages` and `reply`.
+
+The monitor can be enabled or disabled independently of the contact allowlist.
+
+The current monitor is a bounded polling primitive. It does not itself imply that ChatGPT receives unsolicited MCP messages. A client must call `telegram_get_new_messages` to retrieve new inbound messages.
+
+### 13.6. Safe sending model
+
+Sending is intentionally a two-stage operation.
+
+```text
+telegram_send_message
+        ↓
+encrypted pending draft
+        ↓
+interactive confirmation UI
+        ↓
+telegram_confirm_send
+        ↓
+Telegram User API
+```
+
+`telegram_send_message` never sends to Telegram directly. It creates a short-lived `TelegramSendRequest` containing the encrypted message draft and the resolved allowlisted recipient.
+
+The MCP Apps confirmation card displays the exact recipient and exact message. The user must explicitly choose **Send** or **Cancel**.
+
+On successful delivery, the ciphertext is cleared. Expired, cancelled, or already-used requests cannot be sent again.
+
+The UI resource is exposed through:
+
+```text
+ui://telegram/send-confirmation-v1.html
+```
+
+The text fallback remains available for clients that do not render the MCP Apps card.
+
+### 13.7. Telegram security boundary
+
+The personal Telegram integration enforces several boundaries:
+
+- LifeLog ownership is checked before every account operation.
+- Personal-account access is limited to allowlisted peers.
+- Peer identity uses Telegram IDs, not display-name matching.
+- MTProto sessions are encrypted at rest.
+- QR runtime state is not persisted as reusable QR tokens.
+- Message drafts waiting for confirmation are encrypted.
+- Sending requires an explicit second step.
+- Read operations return normalized message data rather than exposing the raw Telethon client.
+- User message bodies are not written to application logs by the Telegram monitor worker.
+
+This keeps Telegram as an external integration boundary rather than turning it into an uncontrolled secondary database.
+
+### 13.8. Personal Telegram vs Bot Telegram
+
+These paths must remain separate:
+
+| Subsystem | Role | Typical data flow |
+|---|---|---|
+| Telegram OIDC | Identity | Telegram → OAuth → LifeLog user |
+| Telegram Bot API | Notifications | LifeLog Outbox → Dispatcher → Telegram bot |
+| Telegram User API / MTProto | Personal account | LifeLog → encrypted session → user's Telegram account |
+
+A future change to notification delivery should not require changing the personal Telegram integration, and vice versa.
+
+
 ## 14. OAuth architecture
 
 OAuth provider находится в `app/core/oauth_provider.py`.
