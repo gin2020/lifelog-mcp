@@ -585,6 +585,154 @@ These paths must remain separate:
 A future change to notification delivery should not require changing the personal Telegram integration, and vice versa.
 
 
+## 14. Telegram Personal Account Layer
+
+Telegram в LifeLog состоит из трёх независимых ролей:
+
+```text
+Telegram OIDC      → identity / login
+Telegram Bot API   → system notifications
+Telegram MTProto   → personal account access
+```
+
+### 14.1. Account and session model
+
+`TelegramAccount` хранит связь `user_id → Telegram account`, метаданные аккаунта и зашифрованную Telethon `StringSession`. В текущей версии один LifeLog user имеет один подключённый личный Telegram-аккаунт.
+
+`TelegramAuthFlow` хранит только короткоживущую durable state авторизации: flow status, phone/code state и QR metadata. Живой `QRLogin`, Telethon client и runtime task остаются в памяти процесса.
+
+`TelegramAllowedPeer` — явный per-user allowlist. Peer идентифицируется стабильной парой `peer_type + telegram_peer_id`; для отправки и чтения сначала проверяется принадлежность peer текущему пользователю и его активность.
+
+`TelegramDialogueMonitor` хранит состояние ограниченного мониторинга разрешённого диалога: тип monitor, anchor, watermarks и active state.
+
+`TelegramSendRequest` — короткоживущий pending request для исходящего сообщения. Текст хранится только в зашифрованном виде до отправки/отмены/истечения срока.
+
+### 14.2. Authorization flows
+
+Поддерживаются два пути:
+
+```text
+Phone/code flow
+MCP
+ ↓
+telegram_connect(start)
+ ↓
+Telegram auth code
+ ↓
+submit_code
+ ↓
+optional submit_2fa
+ ↓
+encrypted StringSession
+```
+
+и:
+
+```text
+QR flow
+MCP
+ ↓
+telegram_connect(qr_start)
+ ↓
+official Telethon QRLogin
+ ↓
+qr_status / background wait
+ ↓
+optional 2FA
+ ↓
+encrypted StringSession
+```
+
+QR runtime не записывает live authorization object в PostgreSQL. Для одного пользователя одновременно контролируется отдельный runtime flow.
+
+### 14.3. Contact discovery and allowlist
+
+Поиск контактов поддерживает номер телефона, `@username`, username без `@` с exact resolution, имя/частичное имя среди Telegram contacts и числовой Telegram ID.
+
+Поиск не добавляет контакт в allowlist автоматически. Типовой pipeline:
+
+```text
+telegram_search_contacts
+        ↓
+inspect exact peer identity
+        ↓
+telegram_add_allowed_contact
+        ↓
+TelegramAllowedPeer
+```
+
+Это предотвращает неявное расширение зоны доступа AI.
+
+### 14.4. Read path
+
+История конкретного диалога:
+
+```text
+telegram_get_messages
+        ↓
+allowlist check
+        ↓
+Telethon get_messages
+```
+
+Новые сообщения:
+
+```text
+TelegramAllowedPeer
+        ↓
+TelegramDialogueMonitor (active)
+        ↓
+watermark
+        ↓
+Telethon get_messages
+        ↓
+incoming-only filter
+        ↓
+advance read watermark
+```
+
+Исходящие сообщения пользователя исключаются из `telegram_get_new_messages`.
+
+### 14.5. Sending path and confirmation UI
+
+Исходящая операция намеренно не является одностадийной:
+
+```text
+telegram_send_message
+        ↓
+TelegramSendRequest(pending)
+        ↓
+MCP Apps confirmation resource
+        ↓
+telegram_confirm_send
+        ↓
+Telethon send_message
+        ↓
+sent + message_id
+```
+
+Отмена выполняется через `telegram_cancel_send` и не вызывает Telegram API. Expired/cancelled requests очищают ciphertext.
+
+### 14.6. Bounded monitoring and notifications
+
+`TelegramUserWorker` выполняет bounded polling: за один проход обрабатывается ограниченный active monitor из allowlist. Worker не сканирует все Telegram dialogs пользователя.
+
+При обнаружении входящих сообщений worker двигает watermark и создаёт `NotificationOutbox` событие `telegram.new_messages`. В payload отправляется только безопасная метаинформация, например количество сообщений; тело личного сообщения туда не записывается.
+
+Это позволяет в будущем подключить proactive notifications, не превращая LifeLog в полную копию Telegram истории.
+
+### 14.7. Privacy boundary
+
+Ключевые privacy invariants:
+
+- Telegram session ciphertext не хранится в открытом виде;
+- pending message ciphertext не хранится в открытом виде;
+- QR runtime state не сериализуется;
+- outbox payload не содержит текст личных сообщений;
+- allowlist проверяется по `user_id`;
+- AI не получает доступ к произвольным Telegram peer без явного allowlist.
+
+
 ## 14. OAuth architecture
 
 OAuth provider находится в `app/core/oauth_provider.py`.
