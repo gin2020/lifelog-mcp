@@ -323,7 +323,75 @@ Client secret, полученный через Dynamic Client Registration, ши
 
 ---
 
-# 6. Telegram Notifications
+## 6. Personal Telegram account
+
+LifeLog supports a **user's personal Telegram account** through the Telegram User API (MTProto), implemented with Telethon. This is separate from both Telegram OIDC authentication and the Telegram Bot API used for notifications.
+
+### What this enables
+
+The connected personal account can:
+
+- search Telegram contacts by phone, username, Telegram ID, or name;
+- explicitly allowlist contacts, including contacts without a username;
+- read message history from an allowlisted peer;
+- retrieve new inbound messages from active monitored dialogues;
+- send messages only after explicit confirmation.
+
+### Security model
+
+The personal Telegram session is encrypted at rest. Access is scoped to the current LifeLog user and to an explicit peer allowlist.
+
+Sending is deliberately two-step:
+
+```text
+telegram_send_message
+        ↓
+prepared encrypted draft
+        ↓
+confirmation card
+        ↓
+telegram_confirm_send
+        ↓
+Telegram User API
+```
+
+The confirmation card shows the exact recipient and exact message and provides **Send** / **Cancel** actions. Pending drafts expire and cannot be reused after cancellation, expiration, or successful delivery.
+
+### Contact discovery
+
+`telegram_search_contacts` resolves contacts and returns a stable `telegram_peer_id`. This means a contact does not need a public `@username` to be added safely.
+
+Typical flow:
+
+```text
+telegram_search_contacts
+        ↓
+telegram_add_allowed_contact
+        ↓
+telegram_get_messages / telegram_start_monitoring / telegram_send_message
+```
+
+### Reading and monitoring
+
+`telegram_get_messages` is an explicit history read for one allowlisted peer.
+
+`telegram_get_new_messages` returns only new inbound messages from peers with active monitors and advances a per-dialogue watermark. It is a bounded polling operation, not an unrestricted scan of the Telegram account and not a push channel by itself.
+
+Monitoring is controlled with:
+
+- `telegram_start_monitoring`
+- `telegram_stop_monitoring`
+
+### Authentication
+
+`telegram_connect` supports staged phone/code authorization and official QR login. QR login keeps the live Telethon QR runtime in process memory; reusable QR tokens are not persisted in PostgreSQL. The authorized MTProto session is encrypted before it is stored.
+
+### Current boundary
+
+The current implementation associates one active Telegram personal account with each LifeLog user. Multi-account support is a future extension.
+
+
+# 7. Telegram Notifications
 
 Telegram как канал уведомлений отделён от Telegram OIDC.
 
