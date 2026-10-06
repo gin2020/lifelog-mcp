@@ -1,9 +1,11 @@
 """Small Telethon adapter for per-user Telegram MTProto sessions."""
 
 from dataclasses import dataclass
+import re
 from typing import Any, Callable
 
 from app.config.settings import Settings, get_settings
+from telethon import functions
 
 class TelegramUserApiError(RuntimeError):
     """Safe application error for Telegram User API operations."""
@@ -50,6 +52,8 @@ class TelegramPeer:
     access_hash: int | None
     username: str | None
     display_name: str
+    phone: str | None = None
+    is_contact: bool = False
 
 
 class TelegramUserApi:
@@ -113,7 +117,7 @@ class TelegramUserApi:
         return value.__class__.__name__ if value is not None else None
 
     @staticmethod
-    def peer_from_entity(entity: Any) -> TelegramPeer:
+    def peer_from_entity(entity: Any, is_contact: bool | None = None) -> TelegramPeer:
         entity_id = getattr(entity, "id", None)
         if not isinstance(entity_id, int):
             raise TelegramUserApiError("Telegram entity has no numeric ID")
@@ -127,14 +131,132 @@ class TelegramUserApi:
         last = getattr(entity, "last_name", None) or ""
         title = getattr(entity, "title", None)
         display_name = str(title or " ".join(part for part in (first, last) if part) or getattr(entity, "username", None) or entity_id)
-        return TelegramPeer(peer_type, entity_id, getattr(entity, "access_hash", None), getattr(entity, "username", None), display_name)
+        phone = TelegramUserApi._format_phone(getattr(entity, "phone", None))
+        contact = getattr(entity, "contact", None) if is_contact is None else is_contact
+        return TelegramPeer(
+            peer_type,
+            entity_id,
+            getattr(entity, "access_hash", None),
+            getattr(entity, "username", None),
+            display_name,
+            phone=phone,
+            is_contact=bool(contact),
+        )
 
     async def resolve_peer(self, client: Any, reference: str | int) -> TelegramPeer:
         try:
             entity = await client.get_entity(reference)
         except Exception as error:
-            raise TelegramUserApiError("Telegram peer could not be resolved") from error
+            if isinstance(reference, int):
+                try:
+                    entity = next(
+                        contact for contact in await self._get_contacts(client)
+                        if getattr(contact, "id", None) == reference
+                    )
+                except (StopIteration, TelegramUserApiError):
+                    raise TelegramUserApiError("Telegram peer could not be resolved") from error
+            else:
+                raise TelegramUserApiError("Telegram peer could not be resolved") from error
         return self.peer_from_entity(entity)
+
+    async def search_contacts(self, client: Any, query: str) -> list[TelegramPeer]:
+        """Search the connected user's contacts or resolve an exact peer.
+
+        Phone numbers and names are deliberately searched only in Telegram's
+        contacts returned by ``contacts.getContacts``. Username and numeric
+        ID queries use Telethon's normal entity resolver and never add a peer
+        to the allowlist by themselves.
+        """
+        query = query.strip()
+        if not query:
+            raise TelegramUserApiError("Telegram contact search query is required")
+
+        if query.lstrip("-").isdigit():
+            try:
+                return [await self.resolve_peer(client, int(query))]
+            except TelegramUserApiError:
+                normalized_query = self._normalize_phone(query)
+                contacts = await self._get_contacts(client)
+                return self._dedupe_peers(
+                    self.peer_from_entity(contact, is_contact=True)
+                    for contact in contacts
+                    if self._normalize_phone(getattr(contact, "phone", None)) == normalized_query
+                )
+
+        if query.startswith("+"):
+            normalized_query = self._normalize_phone(query)
+            if not normalized_query:
+                return []
+            contacts = await self._get_contacts(client)
+            return self._dedupe_peers(
+                self.peer_from_entity(contact, is_contact=True)
+                for contact in contacts
+                if self._normalize_phone(getattr(contact, "phone", None)) == normalized_query
+            )
+
+        if query.startswith("@"):
+            try:
+                return [await self.resolve_peer(client, query)]
+            except TelegramUserApiError:
+                return []
+
+        # A username without '@' is an exact identifier when Telegram resolves
+        # it. If it does not, treat the same query as a contact-name search.
+        if not any(character.isspace() for character in query):
+            try:
+                return [await self.resolve_peer(client, query)]
+            except TelegramUserApiError:
+                pass
+
+        contacts = await self._get_contacts(client)
+        query_folded = query.casefold()
+        return self._dedupe_peers(
+            self.peer_from_entity(contact, is_contact=True)
+            for contact in contacts
+            if self._contact_matches(contact, query_folded)
+        )
+
+    @staticmethod
+    async def _get_contacts(client: Any) -> list[Any]:
+        try:
+            response = await client(functions.contacts.GetContactsRequest(0))
+        except Exception as error:
+            raise TelegramUserApiError("Telegram contacts could not be loaded") from error
+        return list(getattr(response, "users", ()))
+
+    @staticmethod
+    def _contact_matches(entity: Any, query: str) -> bool:
+        values = (
+            getattr(entity, "first_name", None),
+            getattr(entity, "last_name", None),
+            getattr(entity, "username", None),
+            " ".join(
+                part for part in (
+                    getattr(entity, "first_name", None),
+                    getattr(entity, "last_name", None),
+                )
+                if isinstance(part, str) and part
+            ),
+        )
+        return any(isinstance(value, str) and query in value.casefold() for value in values)
+
+    @staticmethod
+    def _dedupe_peers(peers) -> list[TelegramPeer]:
+        result: dict[tuple[str, int], TelegramPeer] = {}
+        for peer in peers:
+            result.setdefault((peer.peer_type, peer.telegram_peer_id), peer)
+        return list(result.values())
+
+    @staticmethod
+    def _normalize_phone(value: Any) -> str:
+        if value is None:
+            return ""
+        return re.sub(r"\D", "", str(value))
+
+    @staticmethod
+    def _format_phone(value: Any) -> str | None:
+        normalized = TelegramUserApi._normalize_phone(value)
+        return f"+{normalized}" if normalized else None
 
     @staticmethod
     async def send_message(client: Any, peer: int, text: str, reply_to: int | None = None) -> int:

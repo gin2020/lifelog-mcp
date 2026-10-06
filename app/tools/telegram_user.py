@@ -60,7 +60,22 @@ def telegram_disconnect() -> dict[str, str]:
 
 
 @mcp.tool()
-async def telegram_add_allowed_contact(reference: str) -> dict[str, object]:
+async def telegram_search_contacts(query: str) -> dict[str, object]:
+    """Search the connected user's Telegram contacts or exact peer identifiers."""
+    return await TelegramUserService().search_contacts(_user_id(), query)
+
+
+@mcp.tool()
+async def telegram_add_allowed_contact(
+    reference: str | int | None = None,
+    telegram_peer_id: int | None = None,
+) -> dict[str, object]:
+    if reference is not None and telegram_peer_id is not None:
+        raise TelegramUserServiceError("Provide either reference or telegram_peer_id, not both")
+    if reference is None:
+        reference = telegram_peer_id
+    if reference is None:
+        raise TelegramUserServiceError("reference or telegram_peer_id is required")
     return await TelegramUserService().add_allowed_peer(_user_id(), reference)
 
 

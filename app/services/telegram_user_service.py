@@ -48,13 +48,36 @@ class TelegramUserService:
         finally:
             await client.disconnect()
 
-    async def add_allowed_peer(self, user_id: int, reference: str) -> dict[str, object]:
-        reference = reference.strip()
-        if not reference or (not reference.lstrip("-").isdigit() and not reference.startswith("@")):
+    async def search_contacts(self, user_id: int, query: str) -> dict[str, object]:
+        query = query.strip()
+        if not query:
+            raise TelegramUserServiceError("Telegram contact search query is required")
+        async for client in self._client(user_id):
+            try:
+                peers = await self._api.search_contacts(client, query)
+            except TelegramUserApiError as error:
+                raise TelegramUserServiceError(str(error)) from error
+        return {"results": [self._search_result(peer) for peer in peers]}
+
+    async def add_allowed_peer(self, user_id: int, reference: str | int) -> dict[str, object]:
+        if isinstance(reference, int):
+            resolved_reference: str | int = reference
+        else:
+            resolved_reference = reference.strip()
+        if not resolved_reference or (
+            isinstance(resolved_reference, str)
+            and not resolved_reference.lstrip("-").isdigit()
+            and not resolved_reference.startswith("@")
+        ):
             raise TelegramUserServiceError("Use an exact Telegram ID or @username; names require explicit resolution")
         async for client in self._client(user_id):
             try:
-                peer = await self._api.resolve_peer(client, int(reference) if reference.lstrip("-").isdigit() else reference)
+                peer = await self._api.resolve_peer(
+                    client,
+                    int(resolved_reference)
+                    if isinstance(resolved_reference, str) and resolved_reference.lstrip("-").isdigit()
+                    else resolved_reference,
+                )
             except TelegramUserApiError as error:
                 raise TelegramUserServiceError(str(error)) from error
         with SessionLocal() as db:
@@ -202,3 +225,14 @@ class TelegramUserService:
     @staticmethod
     def _peer_result(peer: TelegramAllowedPeer) -> dict[str, object]:
         return {"allowed_peer_id": peer.id, "peer_type": peer.peer_type, "telegram_peer_id": peer.telegram_peer_id, "username": peer.username, "display_name": peer.display_name, "is_enabled": peer.is_enabled}
+
+    @staticmethod
+    def _search_result(peer: TelegramPeer) -> dict[str, object]:
+        return {
+            "peer_type": peer.peer_type,
+            "telegram_peer_id": peer.telegram_peer_id,
+            "username": peer.username,
+            "display_name": peer.display_name,
+            "phone": peer.phone,
+            "is_contact": peer.is_contact,
+        }
