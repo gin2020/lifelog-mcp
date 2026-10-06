@@ -417,6 +417,82 @@ Outbox хранит агрегат, тип события, владельца, �
 
 ---
 
+## 7. Telegram Personal Account Integration
+
+LifeLog MCP поддерживает работу с **личным аккаунтом Telegram через MTProto (Telethon)**. Это отдельная подсистема от Telegram OIDC и Telegram Bot API: OIDC используется для входа пользователя в LifeLog, Bot API — для системных уведомлений, а Telegram User API предоставляет AI ограниченный доступ к личным Telegram-диалогам пользователя.
+
+### Что реализовано
+
+- подключение личного Telegram-аккаунта;
+- авторизация по телефону/коду и через официальный QR-login Telethon;
+- поддержка Telegram 2FA;
+- зашифрованное хранение Telethon `StringSession` в PostgreSQL;
+- универсальный поиск контактов по номеру телефона, имени, `@username` и Telegram ID;
+- явный per-user allowlist разрешённых диалогов;
+- чтение истории конкретного разрешённого диалога;
+- получение новых входящих сообщений только из активных разрешённых мониторов;
+- управляемое включение и остановка мониторинга диалога;
+- двухшаговая отправка сообщений с обязательным подтверждением;
+- интерактивная MCP Apps-карточка с точным получателем и текстом перед отправкой;
+- отмена подготовленного сообщения без вызова Telegram API;
+- короткоживущие зашифрованные черновики исходящих сообщений.
+
+### Безопасностная модель
+
+Телеграм-подсистема следует принципу **explicit allowlist**: наличие контакта в Telegram само по себе не означает, что AI может читать или писать этот диалог. Для работы с диалогом он должен быть явно добавлен пользователем в allowlist.
+
+Идентичность peer определяется стабильной парой `peer_type + telegram_peer_id`, а пользовательский `TelegramAccount` привязан к конкретному `user_id`. Данные разных пользователей не смешиваются.
+
+Telethon `StringSession` хранится только в зашифрованном виде. QR runtime-объекты и живые Telethon clients не сериализуются в PostgreSQL. Текст подготовленного исходящего сообщения также хранится зашифрованным и очищается после отправки или отмены.
+
+### Отправка сообщений
+
+Отправка намеренно разделена на два этапа:
+
+```text
+telegram_send_message
+        ↓
+encrypted pending draft
+        ↓
+interactive confirmation card
+     ┌──┴──┐
+  Send   Cancel
+    ↓       ↓
+confirm   cancel
+    ↓
+Telegram MTProto
+```
+
+Прямой `telegram_send_message` не отправляет сообщение в Telegram. Он только создаёт короткоживущий pending request. Фактическая отправка происходит исключительно через `telegram_confirm_send` после явного подтверждения.
+
+### MCP tools
+
+```text
+telegram_connect
+telegram_status
+telegram_disconnect
+telegram_search_contacts
+telegram_add_allowed_contact
+telegram_list_allowed_contacts
+telegram_remove_allowed_contact
+telegram_send_message
+telegram_confirm_send
+telegram_cancel_send
+telegram_get_messages
+telegram_get_new_messages
+telegram_start_monitoring
+telegram_stop_monitoring
+```
+
+`telegram_get_new_messages` является MCP-операцией получения новых сообщений из активных мониторов; сама по себе она не является push-каналом. Отдельный polling worker может обнаруживать новые входящие сообщения и создавать нейтральные Notification Outbox события без сохранения текста сообщения в outbox payload.
+
+### Текущие границы
+
+Сейчас модель Telegram-аккаунта — **один подключённый Telegram-аккаунт на одного LifeLog user**. Поддержка нескольких личных Telegram-аккаунтов на одного пользователя оставлена как будущее расширение. Каналы Telegram и связанные discussion-чаты возможны через MTProto, но текущая allowlist-логика ориентирована прежде всего на диалоги.
+
+---
+
+
 # 7. Notification Dispatcher
 
 Dispatcher работает отдельным процессом.
