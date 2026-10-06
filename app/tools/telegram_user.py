@@ -13,6 +13,7 @@ from app.services.telegram_user_service import TelegramUserService, TelegramUser
 
 TELEGRAM_SEND_CONFIRMATION_UI_URI = "ui://telegram/send-confirmation-v1.html"
 TELEGRAM_SEND_CONFIRMATION_UI_PATH = Path(__file__).resolve().parents[1] / "ui" / "telegram_send_confirmation.html"
+TELEGRAM_SEND_CONFIRMATION_UI_DOMAIN = "https://mcp.jesarion.com"
 TELEGRAM_SEND_CONFIRMATION_TOOL_META = {
     "ui": {
         "resourceUri": TELEGRAM_SEND_CONFIRMATION_UI_URI,
@@ -147,7 +148,14 @@ def telegram_stop_monitoring(allowed_peer_id: int) -> dict[str, object]:
     description="Interactive confirmation card for a prepared Telegram message.",
     mime_type="text/html;profile=mcp-app",
     meta={
-        "ui": {"prefersBorder": True},
+        "ui": {
+            "prefersBorder": True,
+            "domain": TELEGRAM_SEND_CONFIRMATION_UI_DOMAIN,
+            "csp": {
+                "connectDomains": [],
+                "resourceDomains": [],
+            },
+        },
         "openai/widgetDescription": "Confirms the exact Telegram recipient and message before sending.",
     },
 )

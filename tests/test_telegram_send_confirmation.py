@@ -222,6 +222,8 @@ class TelegramSendConfirmationTestCase(BaseSendTestCase):
         self.assertEqual(tool.meta["ui"]["resourceUri"], "ui://telegram/send-confirmation-v1.html")
         self.assertEqual(tool.meta["openai/outputTemplate"], tool.meta["ui"]["resourceUri"])
         resource = next(item for item in mcp._resource_manager.list_resources() if str(item.uri) == tool.meta["ui"]["resourceUri"])
+        self.assertEqual(resource.meta["ui"]["domain"], "https://mcp.jesarion.com")
+        self.assertEqual(resource.meta["ui"]["csp"], {"connectDomains": [], "resourceDomains": []})
         html = asyncio.run(resource.read())
         self.assertIn("telegram_confirm_send", html)
         self.assertIn("telegram_cancel_send", html)
