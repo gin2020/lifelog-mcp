@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; padding: 12px; color: #1f2937; background: transparent; }
+    @media (prefers-color-scheme: dark) { body { color: #f3f4f6; } }
+    .card { max-width: 520px; border: 1px solid #d1d5db; border-radius: 14px; padding: 16px; box-sizing: border-box; }
+    .title { font-size: 17px; font-weight: 700; margin-bottom: 14px; }
+    .label { color: #6b7280; font-size: 12px; font-weight: 700; margin-top: 10px; text-transform: uppercase; }
+    .recipient { margin-top: 4px; font-weight: 650; }
+    .username { color: #6b7280; font-size: 13px; margin-top: 2px; }
+    .message { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 6px; padding-top: 10px; border-top: 1px solid #d1d5db; line-height: 1.45; }
+    .actions { display: flex; gap: 8px; margin-top: 16px; }
+    button { border: 0; border-radius: 9px; cursor: pointer; font: inherit; font-weight: 650; padding: 9px 14px; }
+    button:disabled { cursor: default; opacity: .55; }
+    .send { color: white; background: #0f766e; }
+    .cancel { color: #374151; background: #e5e7eb; }
+    .status { font-weight: 700; margin-top: 4px; }
+    .error { color: #b45309; font-weight: 650; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <main class="card" aria-live="polite">
+    <div class="title">📤 Отправить сообщение</div>
+    <section id="confirmation">
+      <div class="label">Получатель</div>
+      <div id="recipient" class="recipient"></div>
+      <div id="username" class="username"></div>
+      <div class="label">Сообщение</div>
+      <div id="message" class="message"></div>
+      <div class="actions">
+        <button id="send" class="send" type="button">✅ Отправить</button>
+        <button id="cancel" class="cancel" type="button">❌ Отмена</button>
+      </div>
+      <div id="error" class="error" hidden></div>
+    </section>
+    <section id="result" hidden>
+      <div id="result-status" class="status"></div>
+      <div id="result-details" class="username"></div>
+    </section>
+  </main>
+  <script>
+    (() => {
+      const openai = typeof window !== "undefined" ? window.openai : undefined;
+      const pending = new Map();
+      let nextId = 1;
+      let current = null;
+
+      const $ = (id) => document.getElementById(id);
+      const showError = (message) => { $("error").textContent = message; $("error").hidden = false; };
+      const resultData = (payload) => {
+        const value = payload?.structuredContent ?? payload?.structured_content ?? payload;
+        return value?.result ?? value;
+      };
+      const errorText = (payload) => {
+        if (typeof payload === "string") return payload;
+        if (payload?.error) return typeof payload.error === "string" ? payload.error : JSON.stringify(payload.error);
+        if (Array.isArray(payload?.content)) {
+          const text = payload.content.filter((item) => item?.type === "text").map((item) => item.text).join("\n");
+          if (text) return text;
+        }
+        return "MCP request failed";
+      };
+
+      function postRequest(method, params) {
+        return new Promise((resolve, reject) => {
+          const id = `telegram-ui-${nextId++}`;
+          pending.set(id, { resolve, reject });
+          window.parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+        });
+      }
+
+      window.addEventListener("message", (event) => {
+        if (event.source !== window.parent || !event.data || event.data.jsonrpc !== "2.0") return;
+        const message = event.data;
+        if (message.method === "ui/notifications/tool-result") {
+          render(resultData(message.params));
+          return;
+        }
+        if (message.id && pending.has(message.id)) {
+          const request = pending.get(message.id);
+          pending.delete(message.id);
+          if (message.error) request.reject(new Error(message.error.message || "MCP request failed"));
+          else request.resolve(message.result);
+        }
+      }, { passive: true });
+
+      async function callTool(name, args) {
+        if (openai?.callTool) return openai.callTool(name, args);
+        return postRequest("tools/call", { name, arguments: args });
+      }
+
+      function render(data) {
+        if (!data || !data.status) return;
+        if (data.status === "confirmation_required") {
+          current = data;
+          $("recipient").textContent = data.recipient?.display_name || "Telegram-контакт";
+          $("username").textContent = data.recipient?.username ? `@${data.recipient.username.replace(/^@/, "")}` : "";
+          $("message").textContent = data.text || "";
+          return;
+        }
+        if (data.status === "sent") {
+          finish("✅ Сообщение отправлено", data.telegram_message_id ? `Telegram message ID: ${data.telegram_message_id}` : "");
+        } else if (data.status === "cancelled") {
+          finish("❌ Отправка отменена", "");
+        }
+      }
+
+      function finish(status, details) {
+        $("confirmation").hidden = true;
+        $("result").hidden = false;
+        $("result-status").textContent = status;
+        $("result-details").textContent = details;
+      }
+
+      function handleRequestError(error) {
+        const text = String(error?.message || error || "");
+        if (/invalid|expired|already used/i.test(text)) {
+          finish("⚠️ Запрос на отправку истёк.", "Подготовьте сообщение повторно.");
+        } else {
+          showError("Не удалось выполнить действие. Сообщение не отправлено.");
+        }
+      }
+
+      $("send").addEventListener("click", async () => {
+        if (!current?.request_id) return;
+        $("send").disabled = true;
+        $("cancel").disabled = true;
+        try {
+          const data = resultData(await callTool("telegram_confirm_send", { request_id: current.request_id }));
+          if (data?.status === "sent") render(data);
+          else handleRequestError(errorText(data));
+        } catch (error) { handleRequestError(error); }
+      });
+
+      $("cancel").addEventListener("click", async () => {
+        if (!current?.request_id) return;
+        $("send").disabled = true;
+        $("cancel").disabled = true;
+        try {
+          const data = resultData(await callTool("telegram_cancel_send", { request_id: current.request_id }));
+          if (data?.status === "cancelled") render(data);
+          else handleRequestError(errorText(data));
+        } catch (error) { handleRequestError(error); }
+      });
+
+      const initial = openai?.toolOutput;
+      if (initial) render(resultData(initial));
+      postRequest("ui/initialize", {
+        protocolVersion: "2026-01-26",
+        capabilities: {},
+        clientInfo: { name: "lifelog-telegram-confirmation", version: "1.0.0" },
+      }).then(() => {
+        window.parent.postMessage({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} }, "*");
+      }).catch(() => {
+        // Older ChatGPT widget hosts may expose only window.openai; action buttons
+        // still use that compatibility bridge when available.
+      });
+    })();
+  </script>
+</body>
+</html>

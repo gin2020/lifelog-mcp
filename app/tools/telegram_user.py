@@ -1,5 +1,6 @@
 """MCP tools for a user's Telegram account through MTProto."""
 
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -8,6 +9,21 @@ from app.core.mcp import mcp
 from app.db.database import SessionLocal
 from app.services.telegram_user_auth import TelegramUserAuthError, TelegramUserAuthService
 from app.services.telegram_user_service import TelegramUserService, TelegramUserServiceError
+
+
+TELEGRAM_SEND_CONFIRMATION_UI_URI = "ui://telegram/send-confirmation-v1.html"
+TELEGRAM_SEND_CONFIRMATION_UI_PATH = Path(__file__).resolve().parents[1] / "ui" / "telegram_send_confirmation.html"
+TELEGRAM_SEND_CONFIRMATION_TOOL_META = {
+    "ui": {
+        "resourceUri": TELEGRAM_SEND_CONFIRMATION_UI_URI,
+        "visibility": ["model", "app"],
+    },
+    "openai/outputTemplate": TELEGRAM_SEND_CONFIRMATION_UI_URI,
+}
+TELEGRAM_SEND_ACTION_META = {
+    "ui": {"visibility": ["model", "app"]},
+    "openai/widgetAccessible": True,
+}
 
 
 def _user_id() -> int:
@@ -89,14 +105,19 @@ def telegram_remove_allowed_contact(allowed_peer_id: int) -> dict[str, object]:
     return {"allowed_peer_id": allowed_peer_id, "status": "removed" if TelegramUserService().remove_allowed_peer(_user_id(), allowed_peer_id) else "not_found"}
 
 
-@mcp.tool()
+@mcp.tool(meta=TELEGRAM_SEND_CONFIRMATION_TOOL_META)
 def telegram_send_message(allowed_peer_id: int, text: str) -> dict[str, object]:
     return TelegramUserService().create_send_request(_user_id(), allowed_peer_id, text)
 
 
-@mcp.tool()
+@mcp.tool(meta=TELEGRAM_SEND_ACTION_META)
 async def telegram_confirm_send(request_id: str) -> dict[str, object]:
     return await TelegramUserService().confirm_send(_user_id(), UUID(request_id))
+
+
+@mcp.tool(meta=TELEGRAM_SEND_ACTION_META)
+def telegram_cancel_send(request_id: str) -> dict[str, object]:
+    return TelegramUserService().cancel_send(_user_id(), UUID(request_id))
 
 
 @mcp.tool()
@@ -118,3 +139,17 @@ def telegram_start_monitoring(allowed_peer_id: int, kind: str = "new_messages", 
 @mcp.tool()
 def telegram_stop_monitoring(allowed_peer_id: int) -> dict[str, object]:
     return {"allowed_peer_id": allowed_peer_id, "status": "stopped" if TelegramUserService().stop_monitoring(_user_id(), allowed_peer_id) else "not_found"}
+
+
+@mcp.resource(
+    TELEGRAM_SEND_CONFIRMATION_UI_URI,
+    name="telegram-send-confirmation",
+    description="Interactive confirmation card for a prepared Telegram message.",
+    mime_type="text/html;profile=mcp-app",
+    meta={
+        "ui": {"prefersBorder": True},
+        "openai/widgetDescription": "Confirms the exact Telegram recipient and message before sending.",
+    },
+)
+def telegram_send_confirmation_resource() -> str:
+    return TELEGRAM_SEND_CONFIRMATION_UI_PATH.read_text(encoding="utf-8")

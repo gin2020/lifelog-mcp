@@ -134,6 +134,10 @@ class TelegramUserService:
         with SessionLocal() as db:
             request = db.scalar(select(TelegramSendRequest).where(TelegramSendRequest.id == request_id, TelegramSendRequest.user_id == user_id).with_for_update())
             if request is None or request.status != "pending" or request.expires_at <= datetime.now(timezone.utc):
+                if request is not None and request.status == "pending" and request.expires_at <= datetime.now(timezone.utc):
+                    request.status = "expired"
+                    request.message_ciphertext = ""
+                    db.commit()
                 raise TelegramUserServiceError("Send request is invalid, expired, or already used")
             peer = self._allowed_peer(db, user_id, request.allowed_peer_id)
             text = self._crypto.decrypt(request.message_ciphertext)
@@ -159,6 +163,25 @@ class TelegramUserService:
             stored.message_ciphertext = ""
             db.commit()
         return {"request_id": str(request_id), "status": "sent", "allowed_peer_id": peer.id, "telegram_message_id": message_id}
+
+    def cancel_send(self, user_id: int, request_id: UUID) -> dict[str, object]:
+        """Invalidate a pending send without invoking Telegram."""
+        with SessionLocal() as db:
+            request = db.scalar(select(TelegramSendRequest).where(
+                TelegramSendRequest.id == request_id,
+                TelegramSendRequest.user_id == user_id,
+            ).with_for_update())
+            if request is None or request.status != "pending":
+                raise TelegramUserServiceError("Send request is invalid, expired, or already used")
+            if request.expires_at <= datetime.now(timezone.utc):
+                request.status = "expired"
+                request.message_ciphertext = ""
+                db.commit()
+                raise TelegramUserServiceError("Send request is invalid, expired, or already used")
+            request.status = "cancelled"
+            request.message_ciphertext = ""
+            db.commit()
+            return {"request_id": str(request_id), "status": "cancelled"}
 
     async def get_messages(self, user_id: int, allowed_peer_id: int, limit: int, after_message_id: int | None = None) -> list[dict[str, object]]:
         limit = min(max(limit, 1), self._settings.telegram_max_messages_per_request)
