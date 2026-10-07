@@ -1,0 +1,1 @@
+document.querySelectorAll("details").forEach(d=>{d.addEventListener("toggle",()=>{if(d.open){document.querySelectorAll(".tool-groups details").forEach(o=>{if(o!==d)o.open=false})}})});
