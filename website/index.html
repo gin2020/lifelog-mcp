@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#090b10">
+  <meta name="description" content="LifeLog MCP — персональная память, финансы и Telegram для AI через Model Context Protocol.">
+  <title>LifeLog MCP — Твои данные. Твой AI.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="noise"></div>
+  <header class="header">
+    <div class="container nav">
+      <a class="brand" href="#top"><span class="brand-mark">L</span><span>LifeLog<span class="muted"> MCP</span></span></a>
+      <nav>
+        <a href="#features">Возможности</a>
+        <a href="#tools">Tools</a>
+        <a href="#security">Безопасность</a>
+        <a class="nav-github" href="https://github.com/gin2020/lifelog-mcp" target="_blank" rel="noreferrer">GitHub ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero container">
+      <div class="eyebrow">PERSONAL DATA INFRASTRUCTURE · MCP</div>
+      <h1>Твои данные.<br><span>Твой AI.</span></h1>
+      <p class="hero-copy">LifeLog превращает ChatGPT в естественный интерфейс к твоей персональной базе данных — памяти, финансам и Telegram.</p>
+      <div class="actions">
+        <a class="btn primary" href="#features">Посмотреть возможности</a>
+        <a class="btn ghost" href="https://github.com/gin2020/lifelog-mcp" target="_blank" rel="noreferrer">Исходный код</a>
+      </div>
+      <div class="hero-meta"><span class="dot"></span> MCP endpoint: <code>mcp.jesarion.com</code></div>
+    </section>
+
+    <section id="features" class="section container">
+      <div class="section-head"><span class="kicker">WHAT IT DOES</span><h2>Обычный разговор — реальные операции.</h2><p>Ты говоришь как обычно. AI понимает запрос, выбирает правильный MCP Tool, а LifeLog выполняет строго типизированную и проверяемую операцию.</p></div>
+      <div class="grid three">
+        <article class="card accent"><div class="icon">✦</div><h3>Память</h3><p>Сохраняй факты, события, мысли, идеи и наблюдения. Записи можно обновлять и удалять.</p><div class="tool-line"><code>remember</code><code>create_memory</code><code>update_memory</code><code>delete_memory</code></div></article>
+        <article class="card"><div class="icon">₽</div><h3>Финансы</h3><p>Записывай покупки, расходы и доходы, а потом получай детальную аналитику по своим данным.</p><div class="tool-line"><code>create_finance_event</code><code>update_finance_item</code><code>delete_finance_event</code></div></article>
+        <article class="card"><div class="icon">↗</div><h3>Telegram</h3><p>Подключай личный аккаунт, разрешай конкретные диалоги, читай сообщения и отправляй их только после подтверждения.</p><div class="tool-line"><code>telegram_get_messages</code><code>telegram_send_message</code><code>telegram_confirm_send</code></div></article>
+      </div>
+    </section>
+
+    <section class="section alt">
+      <div class="container split">
+        <div><span class="kicker">HOW IT WORKS</span><h2>AI думает.<br>LifeLog отвечает за данные.</h2><p>Ключевой принцип проекта — разделение ответственности. Модель работает с естественным языком и выбором инструмента. Сервер отвечает за валидацию, ownership, транзакции и детерминированную работу с PostgreSQL.</p></div>
+        <div class="flow">
+          <div><b>01</b><span>Ты говоришь</span><code>«Сколько я потратил на табак?»</code></div>
+          <div><b>02</b><span>ChatGPT выбирает Tool</span><code>query_finance(...)</code></div>
+          <div><b>03</b><span>LifeLog выполняет запрос</span><code>PostgreSQL → результат</code></div>
+          <div><b>04</b><span>AI показывает ответ</span><code>«За месяц — 6 400 ₽»</code></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tools" class="section container">
+      <div class="section-head"><span class="kicker">MCP TOOLS</span><h2>Инструменты, которые уже работают.</h2><p>Имена сохранены как в сервере, чтобы страница была полезна и обычному пользователю, и разработчику.</p></div>
+      <div class="tool-groups">
+        <details open><summary><span class="summary-title">Memory</span><span class="count">4 tools</span></summary><div class="tool-list">
+          <div><code>remember</code><p>Высокоуровневое сохранение общих воспоминаний: фактов, событий, мыслей, идей и наблюдений.</p></div>
+          <div><code>create_memory</code><p>Создание структурированной записи памяти.</p></div>
+          <div><code>update_memory</code><p>Изменение собственной записи памяти по ID.</p></div>
+          <div><code>delete_memory</code><p>Удаление собственной записи памяти по ID.</p></div>
+        </div></details>
+
+        <details open><summary><span class="summary-title">Finance</span><span class="count">6 tools</span></summary><div class="tool-list">
+          <div><code>create_finance_event</code><p>Запись расходов и доходов со структурированными позициями, категориями, суммами и валютой.</p></div>
+          <div><code>update_finance_event</code><p>Изменение метаданных финансового события.</p></div>
+          <div><code>update_finance_item</code><p>Изменение отдельной позиции с автоматическим пересчётом общей суммы.</p></div>
+          <div><code>delete_finance_item</code><p>Удаление позиции с пересчётом итоговой суммы.</p></div>
+          <div><code>delete_finance_event</code><p>Удаление события и всех его позиций.</p></div>
+          <div><code>query_finance</code><p>Детерминированная аналитика: суммы, транзакции, категории, места, статистика и сводки.</p></div>
+        </div></details>
+
+        <details open><summary><span class="summary-title">Personal Telegram</span><span class="count">12 tools</span></summary><div class="tool-list">
+          <div><code>telegram_connect</code><p>Подключение личного аккаунта через телефон/код или официальный QR-login, включая 2FA.</p></div>
+          <div><code>telegram_status</code><p>Проверка состояния подключения личного Telegram.</p></div>
+          <div><code>telegram_disconnect</code><p>Отключение личного Telegram-аккаунта.</p></div>
+          <div><code>telegram_search_contacts</code><p>Поиск по телефону, имени, username или Telegram ID.</p></div>
+          <div><code>telegram_add_allowed_contact</code><p>Явное добавление диалога в per-user allowlist.</p></div>
+          <div><code>telegram_list_allowed_contacts</code><p>Просмотр разрешённых контактов.</p></div>
+          <div><code>telegram_remove_allowed_contact</code><p>Удаление контакта из allowlist.</p></div>
+          <div><code>telegram_get_messages</code><p>Чтение истории конкретного разрешённого диалога.</p></div>
+          <div><code>telegram_get_new_messages</code><p>Получение новых входящих сообщений из активных мониторов.</p></div>
+          <div><code>telegram_start_monitoring</code><p>Включение мониторинга разрешённого диалога.</p></div>
+          <div><code>telegram_stop_monitoring</code><p>Остановка мониторинга.</p></div>
+          <div><code>telegram_send_message</code> → <code>telegram_confirm_send</code><p>Подготовка и отправка сообщения только после явного подтверждения.</p></div>
+        </div></details>
+      </div>
+    </section>
+
+    <section id="security" class="section alt">
+      <div class="container split">
+        <div><span class="kicker">SECURITY BY DESIGN</span><h2>Данные принадлежат тебе.</h2><p>LifeLog разделяет пользователей на серверной стороне. Память и финансы всегда привязаны к владельцу запроса.</p></div>
+        <div class="security-cards">
+          <div class="mini"><b>Ownership</b><span>Каждая запись scoped к <code>user_id</code>.</span></div>
+          <div class="mini"><b>Telegram allowlist</b><span>Контакт нельзя читать или писать только потому, что он есть в Telegram.</span></div>
+          <div class="mini"><b>Confirmed sending</b><span>Исходящее сообщение сначала превращается в зашифрованный pending request.</span></div>
+          <div class="mini"><b>Transactional data</b><span>Финансовые операции и уведомления проходят через серверную бизнес-логику и транзакции.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section container cta">
+      <div class="cta-box"><span class="kicker">OPEN PROJECT</span><h2>LifeLog — это не чат с памятью.<br>Это слой данных для AI.</h2><p>Открой исходный код, архитектуру и реальные MCP Tools проекта.</p><div class="actions"><a class="btn primary" href="https://github.com/gin2020/lifelog-mcp" target="_blank" rel="noreferrer">GitHub repository ↗</a><a class="btn ghost" href="https://mcp.jesarion.com" target="_blank" rel="noreferrer">MCP endpoint ↗</a></div></div>
+    </section>
+  </main>
+
+  <footer class="footer container"><span>© LifeLog MCP</span><span>Built for personal AI infrastructure.</span></footer>
+  <script src="script.js"></script>
+</body>
+</html>
