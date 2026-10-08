@@ -18,6 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.db.types import PrimaryKeyInteger
 
 
 class OperationType(str, Enum):
@@ -33,7 +34,7 @@ class FinanceEvent(Base):
     __tablename__ = "finance_events"
 
     id: Mapped[int] = mapped_column(
-        BigInteger,
+        PrimaryKeyInteger,
         Identity(),
         primary_key=True,
     )

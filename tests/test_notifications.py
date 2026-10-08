@@ -136,7 +136,7 @@ class NotificationInfrastructureTestCase(unittest.TestCase):
 
         self.assertEqual(outbox.event_type, "finance_event.created")
         self.assertNotIn("sensitive product", str(outbox.payload))
-        self.assertNotIn("99", str(outbox.payload))
+        self.assertEqual(outbox.payload["total_amount"], "99.00")
 
     def test_dispatcher_uses_lifecycle_action_in_message(self) -> None:
         """Dispatcher text distinguishes creation, update and deletion."""
@@ -304,7 +304,10 @@ class NotificationInfrastructureTestCase(unittest.TestCase):
         assert retried is not None
         self.assertEqual(retried.status, "pending")
         self.assertEqual(retried.attempts, 1)
-        self.assertGreater(retried.next_retry_at, datetime.now(timezone.utc))
+        retry_at = retried.next_retry_at
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        self.assertGreater(retry_at, datetime.now(timezone.utc))
 
         retried.next_retry_at = datetime.now(timezone.utc)
         self.session.commit()

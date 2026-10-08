@@ -3,11 +3,15 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, String, Text, Uuid, func, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, JSON, String, Text, Uuid, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.database import Base
+from app.db.types import PrimaryKeyInteger
+
+
+NOTIFICATION_PAYLOAD_TYPE = JSON().with_variant(JSONB(), "postgresql")
 
 
 class TelegramNotificationSubscription(Base):
@@ -16,7 +20,7 @@ class TelegramNotificationSubscription(Base):
     __tablename__ = "telegram_notification_subscriptions"
 
     user_id: Mapped[int] = mapped_column(
-        BigInteger,
+        PrimaryKeyInteger,
         ForeignKey("users.id", ondelete="CASCADE"),
         primary_key=True,
     )
@@ -48,7 +52,7 @@ class NotificationOutbox(Base):
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    payload: Mapped[dict[str, str | int]] = mapped_column(JSONB, nullable=False)
+    payload: Mapped[dict[str, str | int]] = mapped_column(NOTIFICATION_PAYLOAD_TYPE, nullable=False)
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="pending", server_default=text("'pending'"), index=True
     )

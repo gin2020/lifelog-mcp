@@ -3,6 +3,7 @@
 from collections.abc import Generator
 
 from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config.settings import get_settings
@@ -12,10 +13,14 @@ class Base(DeclarativeBase):
     """Базовый класс будущих ORM-моделей."""
 
 
-engine = create_engine(
-    str(get_settings().database_url),
-    pool_pre_ping=True,
-)
+database_url = str(get_settings().database_url)
+engine_options = {"pool_pre_ping": True}
+if database_url.startswith("sqlite"):
+    engine_options["connect_args"] = {"check_same_thread": False}
+    if ":memory:" in database_url:
+        engine_options["poolclass"] = StaticPool
+
+engine = create_engine(database_url, **engine_options)
 
 SessionLocal = sessionmaker(
     bind=engine,

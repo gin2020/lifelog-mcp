@@ -7,6 +7,7 @@ from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Identity, Stri
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.db.types import PrimaryKeyInteger
 
 
 class User(Base):
@@ -14,7 +15,7 @@ class User(Base):
 
     __tablename__ = "users"
 
-    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    id: Mapped[int] = mapped_column(PrimaryKeyInteger, Identity(), primary_key=True)
     uuid: Mapped[UUID] = mapped_column(Uuid, default=uuid4, unique=True, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     token_version: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
@@ -39,7 +40,7 @@ class UserIdentity(Base):
         UniqueConstraint("provider", "provider_subject", name="uq_user_identity_provider_subject"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    id: Mapped[int] = mapped_column(PrimaryKeyInteger, Identity(), primary_key=True)
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )

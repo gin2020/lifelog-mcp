@@ -14,6 +14,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.db.types import PrimaryKeyInteger
 
 
 class FinanceCategory(str, Enum):
@@ -44,7 +45,7 @@ class FinanceItem(Base):
     __tablename__ = "finance_items"
 
     id: Mapped[int] = mapped_column(
-        BigInteger,
+        PrimaryKeyInteger,
         Identity(),
         primary_key=True,
     )

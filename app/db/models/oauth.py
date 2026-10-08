@@ -6,6 +6,7 @@ from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, JSON, String,
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.database import Base
+from app.db.types import PrimaryKeyInteger
 
 
 class OAuthClient(Base):
@@ -13,7 +14,7 @@ class OAuthClient(Base):
 
     __tablename__ = "oauth_clients"
 
-    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    id: Mapped[int] = mapped_column(PrimaryKeyInteger, Identity(), primary_key=True)
     client_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     client_metadata: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     client_secret_encrypted: Mapped[str | None] = mapped_column(Text)
@@ -27,7 +28,7 @@ class OAuthAuthorizationRequest(Base):
 
     __tablename__ = "oauth_authorization_requests"
 
-    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    id: Mapped[int] = mapped_column(PrimaryKeyInteger, Identity(), primary_key=True)
     request_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     client_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
@@ -49,7 +50,7 @@ class OAuthAuthorizationCode(Base):
 
     __tablename__ = "oauth_authorization_codes"
 
-    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    id: Mapped[int] = mapped_column(PrimaryKeyInteger, Identity(), primary_key=True)
     code_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     client_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     user_id: Mapped[int] = mapped_column(
@@ -72,7 +73,7 @@ class OAuthRefreshToken(Base):
 
     __tablename__ = "oauth_refresh_tokens"
 
-    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    id: Mapped[int] = mapped_column(PrimaryKeyInteger, Identity(), primary_key=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     client_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     user_id: Mapped[int] = mapped_column(

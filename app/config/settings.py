@@ -6,14 +6,14 @@ from datetime import datetime
 from functools import lru_cache
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import AnyHttpUrl, PostgresDsn, SecretStr, model_validator
+from pydantic import AnyHttpUrl, AnyUrl, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Конфигурация, необходимая для инфраструктуры приложения."""
 
-    database_url: PostgresDsn
+    database_url: AnyUrl
     default_user_telegram_id: int
     auth_enabled: bool = False
     oauth_issuer_url: AnyHttpUrl | None = None
@@ -72,6 +72,13 @@ class Settings(BaseSettings):
                 "Authentication is enabled but required settings are missing: "
                 + ", ".join(missing)
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_database_url(self) -> "Settings":
+        """Allow PostgreSQL in production and SQLite for isolated test runs."""
+        if self.database_url.scheme not in {"postgresql", "postgresql+psycopg", "sqlite", "sqlite+pysqlite"}:
+            raise ValueError("DATABASE_URL must use PostgreSQL or SQLite")
         return self
 
     @model_validator(mode="after")

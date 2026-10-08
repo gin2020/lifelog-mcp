@@ -21,12 +21,11 @@ async def run() -> None:
     worker = TelegramUserWorker(settings)
     logging.getLogger(__name__).info("Telegram User API worker started")
     while not stop_event.is_set():
-        processed = await worker.run_once()
-        if not processed:
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=settings.telegram_user_poll_interval_seconds)
-            except asyncio.TimeoutError:
-                pass
+        await worker.run_once()
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=settings.telegram_user_poll_interval_seconds)
+        except asyncio.TimeoutError:
+            pass
     logging.getLogger(__name__).info("Telegram User API worker stopped")
 
 

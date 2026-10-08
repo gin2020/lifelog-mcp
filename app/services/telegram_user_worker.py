@@ -17,7 +17,12 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramUserWorker:
-    """Process one bounded monitor per call; no message body is persisted or logged."""
+    """Process one fairly scheduled monitor per call.
+
+    ``last_notified_message_id`` is the worker's notification cursor. It is
+    intentionally independent from ``last_read_message_id``, which belongs to
+    the manual ``telegram_get_new_messages`` read API.
+    """
 
     def __init__(self, settings: Settings | None = None, api: TelegramUserApi | None = None) -> None:
         self._settings = settings or get_settings()
@@ -36,20 +41,28 @@ class TelegramUserWorker:
                     TelegramDialogueMonitor.is_active.is_(True),
                     TelegramAllowedPeer.is_enabled.is_(True),
                 )
-                .order_by(TelegramDialogueMonitor.updated_at)
+                .order_by(TelegramDialogueMonitor.updated_at, TelegramDialogueMonitor.id)
+                .with_for_update(skip_locked=True)
                 .limit(1)
             ).first()
             if row is None:
                 return False
             account, monitor, peer = row
-            session = self._crypto.decrypt(account.session_ciphertext)
+            session_ciphertext = account.session_ciphertext
             user_id = account.user_id
             monitor_id = monitor.id
             peer_id = peer.telegram_peer_id
-            watermark = monitor.last_notified_message_id or monitor.anchor_message_id
+            watermark = self._notification_watermark(monitor)
+            # Claim the scheduling turn before network I/O. This both rotates
+            # monitors that have no messages and prevents concurrent workers
+            # from repeatedly selecting the same row.
+            monitor.updated_at = datetime.now(timezone.utc)
+            db.commit()
 
-        client = self._api.client(session)
+        client = None
         try:
+            session = self._crypto.decrypt(session_ciphertext)
+            client = self._api.client(session)
             await client.connect()
             if not await client.is_user_authorized():
                 self._mark_account_error(user_id, "Telegram session is no longer authorized")
@@ -69,23 +82,57 @@ class TelegramUserWorker:
             logger.exception("Telegram User API monitor failed unexpectedly: user_id=%s monitor_id=%s", user_id, monitor_id)
             return True
         finally:
-            await client.disconnect()
+            if client is not None:
+                await client.disconnect()
 
     @staticmethod
-    def _advance_monitor(user_id: int, monitor_id: int, message_id: int, message_count: int) -> None:
+    def _advance_monitor(user_id: int, monitor_id: int, message_id: int, message_count: int) -> bool:
+        """Atomically advance the notification cursor and enqueue one event.
+
+        The row lock makes concurrent worker runs idempotent: only the run that
+        observes a message ID greater than the stored cursor creates the
+        outbox event. Manual reads never update this cursor.
+        """
         with SessionLocal() as db:
-            monitor = db.scalar(select(TelegramDialogueMonitor).where(TelegramDialogueMonitor.id == monitor_id, TelegramDialogueMonitor.user_id == user_id))
-            if monitor is not None:
-                monitor.last_notified_message_id = max(monitor.last_notified_message_id or 0, message_id)
-                monitor.updated_at = datetime.now(timezone.utc)
-                db.add(NotificationOutbox(
-                    aggregate_type="telegram_dialogue_monitor",
-                    aggregate_id=monitor_id,
-                    event_type="telegram.new_messages",
-                    user_id=user_id,
-                    payload={"aggregate_type": "telegram_dialogue_monitor", "aggregate_id": monitor_id, "event_type": "telegram.new_messages", "message_count": message_count},
-                ))
-                db.commit()
+            monitor = db.scalar(
+                select(TelegramDialogueMonitor)
+                .where(
+                    TelegramDialogueMonitor.id == monitor_id,
+                    TelegramDialogueMonitor.user_id == user_id,
+                    TelegramDialogueMonitor.is_active.is_(True),
+                )
+                .with_for_update()
+            )
+            if monitor is None:
+                return False
+            current_watermark = TelegramUserWorker._notification_watermark(monitor) or 0
+            if message_id <= current_watermark:
+                return False
+            monitor.last_notified_message_id = message_id
+            monitor.updated_at = datetime.now(timezone.utc)
+            db.add(NotificationOutbox(
+                aggregate_type="telegram_dialogue_monitor",
+                aggregate_id=monitor_id,
+                event_type="telegram.new_messages",
+                user_id=user_id,
+                payload={
+                    "aggregate_type": "telegram_dialogue_monitor",
+                    "aggregate_id": monitor_id,
+                    "event_type": "telegram.new_messages",
+                    "message_count": message_count,
+                    "last_message_id": message_id,
+                },
+            ))
+            db.commit()
+            return True
+
+    @staticmethod
+    def _notification_watermark(monitor: TelegramDialogueMonitor) -> int | None:
+        """Return the worker cursor without consulting the manual-read cursor."""
+        return max(
+            (value for value in (monitor.anchor_message_id, monitor.last_notified_message_id) if value is not None),
+            default=None,
+        )
 
     @staticmethod
     def _mark_sync(user_id: int) -> None:

@@ -168,8 +168,9 @@ class EditDeleteToolsTestCase(unittest.TestCase):
         assert stored is not None
         self.assertEqual(stored.text, "new text")
 
-        deleted = delete_memory(memory.id)
+        memory_id = memory.id
+        deleted = delete_memory(memory_id)
         self.assertEqual(deleted["status"], "deleted")
-        self.memory_ids.remove(memory.id)
+        self.memory_ids.remove(memory_id)
         self.session.expire_all()
-        self.assertIsNone(MemoryService(self.session).get_memory(self.user_id, memory.id))
+        self.assertIsNone(MemoryService(self.session).get_memory(self.user_id, memory_id))

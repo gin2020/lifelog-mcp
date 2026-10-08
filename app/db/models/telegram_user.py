@@ -7,6 +7,7 @@ from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Identity, Inte
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.database import Base
+from app.db.types import PrimaryKeyInteger
 
 
 class TelegramAccount(Base):
@@ -15,7 +16,7 @@ class TelegramAccount(Base):
     __tablename__ = "telegram_accounts"
     __table_args__ = (UniqueConstraint("telegram_user_id", name="uq_telegram_account_user_id"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    id: Mapped[int] = mapped_column(PrimaryKeyInteger, Identity(), primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, unique=True)
     username: Mapped[str | None] = mapped_column(String(255))
@@ -53,7 +54,7 @@ class TelegramAllowedPeer(Base):
     __tablename__ = "telegram_allowed_peers"
     __table_args__ = (UniqueConstraint("user_id", "peer_type", "telegram_peer_id", name="uq_telegram_allowed_peer"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    id: Mapped[int] = mapped_column(PrimaryKeyInteger, Identity(), primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     peer_type: Mapped[str] = mapped_column(String(16), nullable=False)
     telegram_peer_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -66,18 +67,28 @@ class TelegramAllowedPeer(Base):
 
 
 class TelegramDialogueMonitor(Base):
-    """Watermark for a bounded monitor over an allowlisted dialogue."""
+    """Independent cursors for manual reads and background notifications.
+
+    ``last_read_message_id`` is advanced only by the manual
+    ``telegram_get_new_messages`` operation. ``last_notified_message_id`` is
+    advanced only when the background worker commits a corresponding
+    ``telegram.new_messages`` outbox event. Neither cursor may substitute for
+    the other.
+    """
 
     __tablename__ = "telegram_dialogue_monitors"
     __table_args__ = (UniqueConstraint("user_id", "allowed_peer_id", name="uq_telegram_dialogue_monitor"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    id: Mapped[int] = mapped_column(PrimaryKeyInteger, Identity(), primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     allowed_peer_id: Mapped[int] = mapped_column(ForeignKey("telegram_allowed_peers.id", ondelete="CASCADE"), nullable=False)
     monitor_kind: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'new_messages'"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    # Initial baseline; messages at or below it are not notified.
     anchor_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    # Highest inbound message ID included in a committed worker outbox event.
     last_notified_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    # Highest inbound message ID returned by the manual read API.
     last_read_message_id: Mapped[int | None] = mapped_column(BigInteger)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
