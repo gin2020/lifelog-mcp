@@ -225,7 +225,8 @@ class TelegramUserService:
         if kind not in {"new_messages", "reply"}:
             raise TelegramUserServiceError("Monitor kind must be new_messages or reply")
         with SessionLocal() as db:
-            self._allowed_peer(db, user_id, allowed_peer_id)
+            peer = self._allowed_peer(db, user_id, allowed_peer_id)
+            display_name = (peer.display_name or "").strip() or (f"@{peer.username}" if peer.username else "Контакт Telegram")
             monitor = db.scalar(select(TelegramDialogueMonitor).where(TelegramDialogueMonitor.user_id == user_id, TelegramDialogueMonitor.allowed_peer_id == allowed_peer_id))
             if monitor is None:
                 monitor = TelegramDialogueMonitor(user_id=user_id, allowed_peer_id=allowed_peer_id)
@@ -234,7 +235,14 @@ class TelegramUserService:
             monitor.anchor_message_id = anchor_message_id
             monitor.is_active = True
             db.commit()
-            return {"monitor_id": monitor.id, "allowed_peer_id": allowed_peer_id, "status": "active", "kind": kind}
+            return {
+                "monitor_id": monitor.id,
+                "allowed_peer_id": allowed_peer_id,
+                "display_name": display_name,
+                "status": "active",
+                "kind": kind,
+                "message": f"Мониторинг новых сообщений включён для «{display_name}».",
+            }
 
     def stop_monitoring(self, user_id: int, allowed_peer_id: int) -> bool:
         with SessionLocal() as db:
