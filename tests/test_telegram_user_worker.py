@@ -151,6 +151,7 @@ def test_manual_read_does_not_advance_worker_notification_cursor() -> None:
     events = load_events(monitor_id)
     assert len(events) == 1
     assert events[0].payload["last_message_id"] == 13454
+    assert events[0].payload["display_name"] == "Peer 200"
 
 
 def test_worker_rerun_is_idempotent_for_same_message() -> None:
