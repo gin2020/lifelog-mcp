@@ -228,6 +228,7 @@ class TelegramUserService:
             peer = self._allowed_peer(db, user_id, allowed_peer_id)
             display_name = (peer.display_name or "").strip() or (f"@{peer.username}" if peer.username else "Контакт Telegram")
             monitor = db.scalar(select(TelegramDialogueMonitor).where(TelegramDialogueMonitor.user_id == user_id, TelegramDialogueMonitor.allowed_peer_id == allowed_peer_id))
+            created = monitor is None
             if monitor is None:
                 monitor = TelegramDialogueMonitor(user_id=user_id, allowed_peer_id=allowed_peer_id)
                 db.add(monitor)
@@ -235,12 +236,29 @@ class TelegramUserService:
             monitor.anchor_message_id = anchor_message_id
             monitor.is_active = True
             db.commit()
+            if created:
+                from app.db.models.notification import NotificationOutbox
+
+                db.add(NotificationOutbox(
+                    aggregate_type="telegram_dialogue_monitor",
+                    aggregate_id=monitor.id,
+                    event_type="telegram_dialogue_monitor.created",
+                    user_id=user_id,
+                    payload={
+                        "aggregate_type": "telegram_dialogue_monitor",
+                        "aggregate_id": monitor.id,
+                        "event_type": "telegram_dialogue_monitor.created",
+                        "display_name": display_name,
+                    },
+                ))
+                db.commit()
             return {
                 "monitor_id": monitor.id,
                 "allowed_peer_id": allowed_peer_id,
                 "display_name": display_name,
                 "status": "active",
                 "kind": kind,
+                "created": created,
                 "message": f"Мониторинг новых сообщений включён для «{display_name}».",
             }
 
