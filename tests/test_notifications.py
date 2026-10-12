@@ -162,6 +162,50 @@ class NotificationInfrastructureTestCase(unittest.TestCase):
                 )
                 self.assertEqual(NotificationDispatcher._message_text(event), expected)
 
+    def test_telegram_new_message_notification_uses_contact_name(self) -> None:
+        event = NotificationOutbox(
+            aggregate_type="telegram_dialogue_monitor",
+            aggregate_id=1,
+            event_type="telegram.new_messages",
+            user_id=self.user_id,
+            payload={"display_name": "Дашенька ❤️", "message_count": 1},
+        )
+        self.assertEqual(
+            NotificationDispatcher._message_text(event),
+            "💬 Новое сообщение от «Дашенька ❤️».",
+        )
+
+    def test_telegram_new_message_notification_pluralizes_and_has_fallback(self) -> None:
+        event = NotificationOutbox(
+            aggregate_type="telegram_dialogue_monitor",
+            aggregate_id=2,
+            event_type="telegram.new_messages",
+            user_id=self.user_id,
+            payload={"display_name": "Рабочий чат", "message_count": 3},
+        )
+        self.assertEqual(
+            NotificationDispatcher._message_text(event),
+            "💬 Новые сообщения от «Рабочий чат»: 3.",
+        )
+        event.payload = {"message_count": 1}
+        self.assertEqual(
+            NotificationDispatcher._message_text(event),
+            "💬 Новое сообщение от «Контакт Telegram».",
+        )
+
+    def test_telegram_monitor_created_notification_uses_contact_name(self) -> None:
+        event = NotificationOutbox(
+            aggregate_type="telegram_dialogue_monitor",
+            aggregate_id=1,
+            event_type="telegram_dialogue_monitor.created",
+            user_id=self.user_id,
+            payload={"display_name": "Дашенька ❤️"},
+        )
+        self.assertEqual(
+            NotificationDispatcher._message_text(event),
+            "✅ LifeLog: мониторинг новых сообщений включён для «Дашенька ❤️».",
+        )
+
     def test_memory_update_and_delete_enqueue_lifecycle_events(self) -> None:
         """Memory changes and deletion are atomically represented in outbox."""
         memory = MemoryService(self.session).create_memory(
