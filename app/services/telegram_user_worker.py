@@ -52,6 +52,7 @@ class TelegramUserWorker:
             user_id = account.user_id
             monitor_id = monitor.id
             peer_id = peer.telegram_peer_id
+            peer_display_name = (peer.display_name or "").strip() or (f"@{peer.username}" if peer.username else "Контакт Telegram")
             watermark = self._notification_watermark(monitor)
             # Claim the scheduling turn before network I/O. This both rotates
             # monitors that have no messages and prevents concurrent workers
@@ -70,7 +71,13 @@ class TelegramUserWorker:
             messages = await self._api.get_messages(client, peer_id, self._settings.telegram_max_messages_per_request, watermark)
             incoming = [message for message in messages if not message.get("out") and isinstance(message.get("id"), int)]
             if incoming:
-                self._advance_monitor(user_id, monitor_id, max(message["id"] for message in incoming), len(incoming))
+                self._advance_monitor(
+                    user_id,
+                    monitor_id,
+                    max(message["id"] for message in incoming),
+                    len(incoming),
+                    peer_display_name,
+                )
             self._mark_sync(user_id)
             return True
         except TelegramUserApiError as error:
@@ -86,7 +93,13 @@ class TelegramUserWorker:
                 await client.disconnect()
 
     @staticmethod
-    def _advance_monitor(user_id: int, monitor_id: int, message_id: int, message_count: int) -> bool:
+    def _advance_monitor(
+        user_id: int,
+        monitor_id: int,
+        message_id: int,
+        message_count: int,
+        display_name: str = "Контакт Telegram",
+    ) -> bool:
         """Atomically advance the notification cursor and enqueue one event.
 
         The row lock makes concurrent worker runs idempotent: only the run that
@@ -121,6 +134,7 @@ class TelegramUserWorker:
                     "event_type": "telegram.new_messages",
                     "message_count": message_count,
                     "last_message_id": message_id,
+                    "display_name": display_name,
                 },
             ))
             db.commit()
