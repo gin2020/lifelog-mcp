@@ -103,7 +103,22 @@ class NotificationDispatcher:
 
     @staticmethod
     def _message_text(event: NotificationOutbox) -> str:
-        """Build a lifecycle confirmation without including user content."""
+        """Build a readable notification while keeping Telegram message bodies private."""
+        if event.event_type == "telegram.new_messages":
+            display_name = str(event.payload.get("display_name") or "").strip() or "Контакт Telegram"
+            message_count = event.payload.get("message_count", 1)
+            try:
+                count = max(1, int(message_count))
+            except (TypeError, ValueError):
+                count = 1
+            if count == 1:
+                return f"💬 Новое сообщение от «{display_name}»."
+            return f"💬 Новые сообщения от «{display_name}»: {count}."
+
+        if event.aggregate_type == "telegram_dialogue_monitor" and event.event_type == "telegram_dialogue_monitor.created":
+            display_name = str(event.payload.get("display_name") or "").strip() or "Контакт Telegram"
+            return f"✅ LifeLog: мониторинг новых сообщений включён для «{display_name}»."
+
         action = {
             "created": "сохранена",
             "updated": "изменена",
