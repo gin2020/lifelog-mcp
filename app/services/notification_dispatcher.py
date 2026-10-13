@@ -106,18 +106,22 @@ class NotificationDispatcher:
         """Build a readable notification while keeping Telegram message bodies private."""
         if event.event_type == "telegram.new_messages":
             display_name = str(event.payload.get("display_name") or "").strip() or "Контакт Telegram"
+            account_label = str(event.payload.get("account_label") or "").strip()
+            account_suffix = f" через аккаунт «{account_label}»" if account_label else ""
             message_count = event.payload.get("message_count", 1)
             try:
                 count = max(1, int(message_count))
             except (TypeError, ValueError):
                 count = 1
             if count == 1:
-                return f"💬 Новое сообщение от «{display_name}»."
-            return f"💬 Новые сообщения от «{display_name}»: {count}."
+                return f"💬 Новое сообщение от «{display_name}»{account_suffix}."
+            return f"💬 Новые сообщения от «{display_name}»{account_suffix}: {count}."
 
         if event.aggregate_type == "telegram_dialogue_monitor" and event.event_type == "telegram_dialogue_monitor.created":
             display_name = str(event.payload.get("display_name") or "").strip() or "Контакт Telegram"
-            return f"✅ LifeLog: мониторинг новых сообщений включён для «{display_name}»."
+            account_label = str(event.payload.get("account_label") or "").strip()
+            account_suffix = f" через аккаунт «{account_label}»" if account_label else ""
+            return f"✅ LifeLog: мониторинг новых сообщений включён для «{display_name}»{account_suffix}."
 
         action = {
             "created": "сохранена",

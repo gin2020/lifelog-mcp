@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.config.settings import Settings, get_settings
 from app.db.database import SessionLocal
@@ -33,7 +33,7 @@ class TelegramUserWorker:
         with SessionLocal() as db:
             row = db.execute(
                 select(TelegramAccount, TelegramDialogueMonitor, TelegramAllowedPeer)
-                .join(TelegramDialogueMonitor, TelegramDialogueMonitor.user_id == TelegramAccount.user_id)
+                .join(TelegramDialogueMonitor, or_(TelegramDialogueMonitor.account_id == TelegramAccount.id, (TelegramDialogueMonitor.account_id.is_(None) & (TelegramDialogueMonitor.user_id == TelegramAccount.user_id))))
                 .join(TelegramAllowedPeer, TelegramAllowedPeer.id == TelegramDialogueMonitor.allowed_peer_id)
                 .where(
                     TelegramAccount.status == "active",
@@ -50,6 +50,8 @@ class TelegramUserWorker:
             account, monitor, peer = row
             session_ciphertext = account.session_ciphertext
             user_id = account.user_id
+            account_id = account.id
+            account_label = account.label or "legacy"
             monitor_id = monitor.id
             peer_id = peer.telegram_peer_id
             peer_display_name = (peer.display_name or "").strip() or (f"@{peer.username}" if peer.username else "Контакт Telegram")
@@ -66,7 +68,7 @@ class TelegramUserWorker:
             client = self._api.client(session)
             await client.connect()
             if not await client.is_user_authorized():
-                self._mark_account_error(user_id, "Telegram session is no longer authorized")
+                self._mark_account_error(user_id, account_id, "Telegram session is no longer authorized")
                 return True
             messages = await self._api.get_messages(client, peer_id, self._settings.telegram_max_messages_per_request, watermark)
             incoming = [message for message in messages if not message.get("out") and isinstance(message.get("id"), int)]
@@ -77,15 +79,17 @@ class TelegramUserWorker:
                     max(message["id"] for message in incoming),
                     len(incoming),
                     peer_display_name,
+                    account_id,
+                    account_label,
                 )
-            self._mark_sync(user_id)
+            self._mark_sync(user_id, account_id)
             return True
         except TelegramUserApiError as error:
-            self._mark_account_error(user_id, str(error))
+            self._mark_account_error(user_id, account_id, str(error))
             logger.warning("Telegram User API monitor failed: user_id=%s monitor_id=%s", user_id, monitor_id)
             return True
         except Exception:
-            self._mark_account_error(user_id, "Unexpected Telegram User API worker error")
+            self._mark_account_error(user_id, account_id, "Unexpected Telegram User API worker error")
             logger.exception("Telegram User API monitor failed unexpectedly: user_id=%s monitor_id=%s", user_id, monitor_id)
             return True
         finally:
@@ -99,6 +103,8 @@ class TelegramUserWorker:
         message_id: int,
         message_count: int,
         display_name: str = "Контакт Telegram",
+        account_id: int | None = None,
+        account_label: str = "legacy",
     ) -> bool:
         """Atomically advance the notification cursor and enqueue one event.
 
@@ -135,6 +141,8 @@ class TelegramUserWorker:
                     "message_count": message_count,
                     "last_message_id": message_id,
                     "display_name": display_name,
+                    "account_id": account_id,
+                    "account_label": account_label,
                 },
             ))
             db.commit()
@@ -149,18 +157,24 @@ class TelegramUserWorker:
         )
 
     @staticmethod
-    def _mark_sync(user_id: int) -> None:
+    def _mark_sync(user_id: int, account_id: int | None = None) -> None:
         with SessionLocal() as db:
-            account = db.scalar(select(TelegramAccount).where(TelegramAccount.user_id == user_id))
+            query = select(TelegramAccount).where(TelegramAccount.user_id == user_id)
+            if account_id is not None:
+                query = query.where(TelegramAccount.id == account_id)
+            account = db.scalar(query)
             if account is not None:
                 account.last_sync_at = datetime.now(timezone.utc)
                 account.last_error = None
                 db.commit()
 
     @staticmethod
-    def _mark_account_error(user_id: int, error: str) -> None:
+    def _mark_account_error(user_id: int, account_id: int | None, error: str) -> None:
         with SessionLocal() as db:
-            account = db.scalar(select(TelegramAccount).where(TelegramAccount.user_id == user_id))
+            query = select(TelegramAccount).where(TelegramAccount.user_id == user_id)
+            if account_id is not None:
+                query = query.where(TelegramAccount.id == account_id)
+            account = db.scalar(query)
             if account is not None:
                 account.last_error = error[:1000]
                 db.commit()

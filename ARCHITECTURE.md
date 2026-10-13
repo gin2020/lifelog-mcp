@@ -427,12 +427,12 @@ The third subsystem is a personal-account integration rather than a bot integrat
 
 ### 13.1. Personal Telegram account
 
-The authenticated Telegram account is stored as `TelegramAccount`, one active account per LifeLog user in the current implementation.
+Authenticated Telegram accounts are stored as labelled `TelegramAccount` rows. A LifeLog user may have multiple accounts, for example `личный` and `рабочий`; account-scoped operations use `account_id`.
 
 ```text
 LifeLog user
-    ↓
-TelegramAccount
+    ├── TelegramAccount (личный)
+    └── TelegramAccount (рабочий)
     ├── telegram_user_id
     ├── username / display_name
     └── encrypted MTProto session
@@ -443,6 +443,8 @@ TelegramAccount
 ```
 
 The raw MTProto session is never stored in plaintext. Session material is encrypted before persistence. Telegram credentials are therefore kept server-side and are not exposed through MCP tool arguments.
+
+Contacts, dialogue monitors, and send confirmations are also account-scoped. A pending send request stores its `account_id` and can only be confirmed through that account's session. Account labels are included in operation results and worker notifications.
 
 ### 13.2. Authentication flow
 

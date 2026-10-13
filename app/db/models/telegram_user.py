@@ -11,13 +11,17 @@ from app.db.types import PrimaryKeyInteger
 
 
 class TelegramAccount(Base):
-    """Encrypted MTProto session belonging to exactly one LifeLog user."""
+    """Encrypted MTProto session belonging to one labelled LifeLog account."""
 
     __tablename__ = "telegram_accounts"
-    __table_args__ = (UniqueConstraint("telegram_user_id", name="uq_telegram_account_user_id"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "label", name="uq_telegram_account_user_label"),
+        UniqueConstraint("telegram_user_id", name="uq_telegram_account_user_id"),
+    )
 
     id: Mapped[int] = mapped_column(PrimaryKeyInteger, Identity(), primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("'legacy'"))
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, unique=True)
     username: Mapped[str | None] = mapped_column(String(255))
     display_name: Mapped[str | None] = mapped_column(String(512))
@@ -38,6 +42,8 @@ class TelegramAuthFlow(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("telegram_accounts.id", ondelete="SET NULL"), index=True)
+    account_label: Mapped[str | None] = mapped_column(String(64))
     phone: Mapped[str | None] = mapped_column(String(32))
     session_ciphertext: Mapped[str | None] = mapped_column(Text)
     phone_code_hash_ciphertext: Mapped[str | None] = mapped_column(Text)
@@ -52,10 +58,11 @@ class TelegramAllowedPeer(Base):
     """Explicit per-user allowlist entry addressed by stable Telegram peer ID."""
 
     __tablename__ = "telegram_allowed_peers"
-    __table_args__ = (UniqueConstraint("user_id", "peer_type", "telegram_peer_id", name="uq_telegram_allowed_peer"),)
+    __table_args__ = (UniqueConstraint("account_id", "peer_type", "telegram_peer_id", name="uq_telegram_allowed_peer"),)
 
     id: Mapped[int] = mapped_column(PrimaryKeyInteger, Identity(), primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("telegram_accounts.id", ondelete="CASCADE"), index=True)
     peer_type: Mapped[str] = mapped_column(String(16), nullable=False)
     telegram_peer_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     access_hash: Mapped[int | None] = mapped_column(BigInteger)
@@ -77,11 +84,12 @@ class TelegramDialogueMonitor(Base):
     """
 
     __tablename__ = "telegram_dialogue_monitors"
-    __table_args__ = (UniqueConstraint("user_id", "allowed_peer_id", name="uq_telegram_dialogue_monitor"),)
+    __table_args__ = (UniqueConstraint("account_id", "allowed_peer_id", name="uq_telegram_dialogue_monitor"),)
 
     id: Mapped[int] = mapped_column(PrimaryKeyInteger, Identity(), primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     allowed_peer_id: Mapped[int] = mapped_column(ForeignKey("telegram_allowed_peers.id", ondelete="CASCADE"), nullable=False)
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("telegram_accounts.id", ondelete="CASCADE"), index=True)
     monitor_kind: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'new_messages'"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     # Initial baseline; messages at or below it are not notified.
@@ -103,6 +111,7 @@ class TelegramSendRequest(Base):
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     allowed_peer_id: Mapped[int] = mapped_column(ForeignKey("telegram_allowed_peers.id", ondelete="RESTRICT"), nullable=False)
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("telegram_accounts.id", ondelete="RESTRICT"), index=True)
     telegram_peer_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     message_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'pending'"), index=True)

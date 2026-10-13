@@ -175,6 +175,19 @@ class NotificationInfrastructureTestCase(unittest.TestCase):
             "💬 Новое сообщение от «Дашенька ❤️».",
         )
 
+    def test_telegram_notification_includes_account_label(self) -> None:
+        event = NotificationOutbox(
+            aggregate_type="telegram_dialogue_monitor",
+            aggregate_id=1,
+            event_type="telegram.new_messages",
+            user_id=self.user_id,
+            payload={"display_name": "Рабочий чат", "account_label": "Рабочий", "message_count": 1},
+        )
+        self.assertEqual(
+            NotificationDispatcher._message_text(event),
+            "💬 Новое сообщение от «Рабочий чат» через аккаунт «Рабочий».",
+        )
+
     def test_telegram_new_message_notification_pluralizes_and_has_fallback(self) -> None:
         event = NotificationOutbox(
             aggregate_type="telegram_dialogue_monitor",

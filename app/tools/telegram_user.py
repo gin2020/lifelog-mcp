@@ -33,7 +33,7 @@ def _user_id() -> int:
 
 
 @mcp.tool()
-async def telegram_connect(operation: str, phone: str | None = None, flow_id: str | None = None, code: str | None = None, password: str | None = None) -> dict[str, object]:
+async def telegram_connect(operation: str, phone: str | None = None, flow_id: str | None = None, code: str | None = None, password: str | None = None, account_id: int | None = None, account_label: str | None = None) -> dict[str, object]:
     """Start or continue staged Telegram User API authorization."""
     service = TelegramUserAuthService()
     user_id = _user_id()
@@ -41,9 +41,9 @@ async def telegram_connect(operation: str, phone: str | None = None, flow_id: st
         if operation == "start":
             if phone is None:
                 raise TelegramUserAuthError("phone is required for start")
-            return await service.start(user_id, phone)
+            return await service.start(user_id, phone, account_id, account_label)
         if operation == "qr_start":
-            return await service.qr_start(user_id)
+            return await service.qr_start(user_id, account_id, account_label)
         if flow_id is None:
             raise TelegramUserAuthError("flow_id is required")
         parsed = UUID(flow_id)
@@ -67,25 +67,39 @@ async def telegram_connect(operation: str, phone: str | None = None, flow_id: st
 
 
 @mcp.tool()
-def telegram_status() -> dict[str, object]:
-    return TelegramUserAuthService().status(_user_id())
+def telegram_status(account_id: int | None = None) -> dict[str, object]:
+    return TelegramUserAuthService().status(_user_id(), account_id)
 
 
 @mcp.tool()
-def telegram_disconnect() -> dict[str, str]:
-    return {"status": "disconnected" if TelegramUserAuthService().disconnect(_user_id()) else "not_connected"}
+def telegram_list_accounts() -> list[dict[str, object]]:
+    return TelegramUserAuthService().list_accounts(_user_id())
 
 
 @mcp.tool()
-async def telegram_search_contacts(query: str) -> dict[str, object]:
+def telegram_rename_account(account_id: int, account_label: str) -> dict[str, object]:
+    return TelegramUserAuthService().rename(_user_id(), account_id, account_label)
+
+
+@mcp.tool()
+def telegram_disconnect(account_id: int | None = None) -> dict[str, str | int | None]:
+    service = TelegramUserAuthService()
+    before = service.status(_user_id(), account_id)
+    disconnected = service.disconnect(_user_id(), account_id)
+    return {"account_id": before.get("account_id", account_id), "account_label": before.get("account_label"), "status": "disconnected" if disconnected else "not_connected"}
+
+
+@mcp.tool()
+async def telegram_search_contacts(query: str, account_id: int | None = None) -> dict[str, object]:
     """Search the connected user's Telegram contacts or exact peer identifiers."""
-    return await TelegramUserService().search_contacts(_user_id(), query)
+    return await TelegramUserService().search_contacts(_user_id(), query, account_id)
 
 
 @mcp.tool()
 async def telegram_add_allowed_contact(
     reference: str | int | None = None,
     telegram_peer_id: int | None = None,
+    account_id: int | None = None,
 ) -> dict[str, object]:
     if reference is not None and telegram_peer_id is not None:
         raise TelegramUserServiceError("Provide either reference or telegram_peer_id, not both")
@@ -93,22 +107,26 @@ async def telegram_add_allowed_contact(
         reference = telegram_peer_id
     if reference is None:
         raise TelegramUserServiceError("reference or telegram_peer_id is required")
-    return await TelegramUserService().add_allowed_peer(_user_id(), reference)
+    return await TelegramUserService().add_allowed_peer(_user_id(), reference, account_id)
 
 
 @mcp.tool()
-def telegram_list_allowed_contacts() -> list[dict[str, object]]:
-    return TelegramUserService().list_allowed_peers(_user_id())
+def telegram_list_allowed_contacts(account_id: int | None = None) -> list[dict[str, object]]:
+    return TelegramUserService().list_allowed_peers(_user_id(), account_id)
 
 
 @mcp.tool()
 def telegram_remove_allowed_contact(allowed_peer_id: int) -> dict[str, object]:
-    return {"allowed_peer_id": allowed_peer_id, "status": "removed" if TelegramUserService().remove_allowed_peer(_user_id(), allowed_peer_id) else "not_found"}
+    user_id = _user_id()
+    service = TelegramUserService()
+    peer = next((item for item in service.list_allowed_peers(user_id) if item["allowed_peer_id"] == allowed_peer_id), None)
+    removed = service.remove_allowed_peer(user_id, allowed_peer_id)
+    return {"allowed_peer_id": allowed_peer_id, "account_id": peer.get("account_id") if peer else None, "account_label": peer.get("account_label") if peer else None, "status": "removed" if removed else "not_found"}
 
 
 @mcp.tool(meta=TELEGRAM_SEND_CONFIRMATION_TOOL_META)
-def telegram_send_message(allowed_peer_id: int, text: str) -> dict[str, object]:
-    return TelegramUserService().create_send_request(_user_id(), allowed_peer_id, text)
+def telegram_send_message(allowed_peer_id: int, text: str, account_id: int | None = None) -> dict[str, object]:
+    return TelegramUserService().create_send_request(_user_id(), allowed_peer_id, text, account_id)
 
 
 @mcp.tool(meta=TELEGRAM_SEND_ACTION_META)
@@ -122,24 +140,24 @@ def telegram_cancel_send(request_id: str) -> dict[str, object]:
 
 
 @mcp.tool()
-async def telegram_get_messages(allowed_peer_id: int, limit: int = 20, after_message_id: int | None = None) -> list[dict[str, object]]:
-    return await TelegramUserService().get_messages(_user_id(), allowed_peer_id, limit, after_message_id)
+async def telegram_get_messages(allowed_peer_id: int, limit: int = 20, after_message_id: int | None = None, account_id: int | None = None) -> list[dict[str, object]]:
+    return await TelegramUserService().get_messages(_user_id(), allowed_peer_id, limit, after_message_id, account_id)
 
 
 @mcp.tool()
-async def telegram_get_new_messages(limit: int = 20) -> list[dict[str, object]]:
+async def telegram_get_new_messages(limit: int = 20, account_id: int | None = None) -> list[dict[str, object]]:
     """Return unread inbound messages from active allowlisted monitors."""
-    return await TelegramUserService().get_new_messages(_user_id(), limit)
+    return await TelegramUserService().get_new_messages(_user_id(), limit, account_id)
 
 
 @mcp.tool()
-def telegram_start_monitoring(allowed_peer_id: int, kind: str = "new_messages", anchor_message_id: int | None = None) -> dict[str, object]:
-    return TelegramUserService().start_monitoring(_user_id(), allowed_peer_id, kind, anchor_message_id)
+def telegram_start_monitoring(allowed_peer_id: int, kind: str = "new_messages", anchor_message_id: int | None = None, account_id: int | None = None) -> dict[str, object]:
+    return TelegramUserService().start_monitoring(_user_id(), allowed_peer_id, kind, anchor_message_id, account_id)
 
 
 @mcp.tool()
-def telegram_stop_monitoring(allowed_peer_id: int) -> dict[str, object]:
-    return {"allowed_peer_id": allowed_peer_id, "status": "stopped" if TelegramUserService().stop_monitoring(_user_id(), allowed_peer_id) else "not_found"}
+def telegram_stop_monitoring(allowed_peer_id: int, account_id: int | None = None) -> dict[str, object]:
+    return {"allowed_peer_id": allowed_peer_id, "account_id": account_id, "status": "stopped" if TelegramUserService().stop_monitoring(_user_id(), allowed_peer_id, account_id) else "not_found"}
 
 
 @mcp.resource(

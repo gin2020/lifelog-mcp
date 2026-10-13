@@ -39,12 +39,13 @@ class TelegramUserAuthService:
         self._api = api or TelegramUserApi(self._settings)
         self._crypto = TelegramSessionCrypto(self._settings)
 
-    async def start(self, user_id: int, phone: str) -> dict[str, object]:
+    async def start(self, user_id: int, phone: str, account_id: int | None = None, account_label: str | None = None) -> dict[str, object]:
         if not phone.strip():
             raise TelegramUserAuthError("Phone number is required")
         now = datetime.now(timezone.utc)
         flow_id = uuid4()
-        await telegram_qr_runtime.cancel_user(user_id)
+        self._validate_target(user_id, account_id, account_label)
+        await telegram_qr_runtime.cancel_user(user_id, account_id, account_label)
         client = self._api.client()
         try:
             await client.connect()
@@ -79,6 +80,7 @@ class TelegramUserAuthService:
             db.query(TelegramAuthFlow).filter(
                 TelegramAuthFlow.user_id == user_id,
                 TelegramAuthFlow.expires_at > now,
+                *self._flow_scope_filters(account_id, account_label),
             ).update({
                 TelegramAuthFlow.status: "cancelled",
                 TelegramAuthFlow.session_ciphertext: None,
@@ -88,6 +90,8 @@ class TelegramUserAuthService:
             db.add(TelegramAuthFlow(
                 id=flow_id,
                 user_id=user_id,
+                account_id=account_id,
+                account_label=account_label,
                 phone=phone.strip(),
                 session_ciphertext=self._crypto.encrypt(session),
                 phone_code_hash_ciphertext=self._crypto.encrypt(phone_code_hash),
@@ -97,11 +101,12 @@ class TelegramUserAuthService:
             db.commit()
         return {"flow_id": str(flow_id), "status": "code_required", **sent_code_metadata}
 
-    async def qr_start(self, user_id: int) -> dict[str, object]:
+    async def qr_start(self, user_id: int, account_id: int | None = None, account_label: str | None = None) -> dict[str, object]:
         """Start official Telegram QR authorization and return only its display URL."""
         now = datetime.now(timezone.utc)
         flow_id = uuid4()
-        await telegram_qr_runtime.cancel_user(user_id)
+        self._validate_target(user_id, account_id, account_label)
+        await telegram_qr_runtime.cancel_user(user_id, account_id, account_label)
         prepared: PreparedQrLogin | None = None
         try:
             prepared = await telegram_qr_runtime.prepare(self._api)
@@ -119,6 +124,7 @@ class TelegramUserAuthService:
                 db.query(TelegramAuthFlow).filter(
                     TelegramAuthFlow.user_id == user_id,
                     TelegramAuthFlow.expires_at > now,
+                    *self._flow_scope_filters(account_id, account_label),
                 ).update({
                     TelegramAuthFlow.status: "cancelled",
                     TelegramAuthFlow.session_ciphertext: None,
@@ -128,6 +134,8 @@ class TelegramUserAuthService:
                 db.add(TelegramAuthFlow(
                     id=flow_id,
                     user_id=user_id,
+                    account_id=account_id,
+                    account_label=account_label,
                     phone=None,
                     session_ciphertext=self._crypto.encrypt(prepared.session),
                     qr_expires_at=prepared.expires_at,
@@ -139,7 +147,7 @@ class TelegramUserAuthService:
             await prepared.client.disconnect()
             raise
         deadline = now + timedelta(seconds=self._settings.telegram_user_auth_flow_ttl_seconds)
-        await telegram_qr_runtime.register(self, user_id, flow_id, prepared, deadline)
+        await telegram_qr_runtime.register(self, user_id, flow_id, prepared, deadline, account_id, account_label)
         logger.info("Telegram QR auth runtime created: user_id=%s flow_id=%s", user_id, flow_id)
         return {"flow_id": str(flow_id), "status": "qr_code_required", "qr_url": prepared.url, "expires_at": prepared.expires_at.isoformat()}
 
@@ -275,9 +283,20 @@ class TelegramUserAuthService:
         session_ciphertext = self._crypto.encrypt(client.session.save())
         now = datetime.now(timezone.utc)
         with SessionLocal() as db:
-            account = db.scalar(select(TelegramAccount).where(TelegramAccount.user_id == user_id).with_for_update())
+            flow = db.get(TelegramAuthFlow, flow_id)
+            account = None
+            if flow is not None and flow.account_id is not None:
+                account = db.scalar(select(TelegramAccount).where(TelegramAccount.id == flow.account_id, TelegramAccount.user_id == user_id).with_for_update())
+            elif flow is not None and flow.account_label:
+                account = db.scalar(select(TelegramAccount).where(TelegramAccount.user_id == user_id, TelegramAccount.label == flow.account_label).with_for_update())
+            else:
+                accounts = list(db.scalars(select(TelegramAccount).where(TelegramAccount.user_id == user_id).with_for_update()))
+                if len(accounts) > 1:
+                    raise TelegramUserAuthError("Multiple Telegram accounts are connected; choose account_id")
+                account = accounts[0] if accounts else None
             if account is None:
-                account = TelegramAccount(user_id=user_id)
+                label = (flow.account_label if flow is not None else None) or "legacy"
+                account = TelegramAccount(user_id=user_id, label=label)
                 db.add(account)
             account.telegram_user_id = telegram_user_id
             account.username = getattr(me, "username", None)
@@ -286,31 +305,87 @@ class TelegramUserAuthService:
             account.status = "active"
             account.last_connected_at = now
             account.last_error = None
-            flow = db.get(TelegramAuthFlow, flow_id)
             if flow is not None:
+                if account.id is None:
+                    db.flush()
+                flow.account_id = account.id
                 flow.status = "completed"
                 flow.session_ciphertext = None
                 flow.phone_code_hash_ciphertext = None
                 flow.qr_expires_at = None
             db.commit()
-        return {"flow_id": str(flow_id), "status": "connected", "telegram_user_id": str(telegram_user_id), "display_name": display_name}
+        return {"flow_id": str(flow_id), "status": "connected", "account_id": account.id, "account_label": account.label, "telegram_user_id": str(telegram_user_id), "display_name": display_name}
 
-    def status(self, user_id: int) -> dict[str, object]:
+    def status(self, user_id: int, account_id: int | None = None) -> dict[str, object]:
         with SessionLocal() as db:
-            account = db.scalar(select(TelegramAccount).where(TelegramAccount.user_id == user_id))
-            if account is None:
+            query = select(TelegramAccount).where(TelegramAccount.user_id == user_id)
+            if account_id is not None:
+                query = query.where(TelegramAccount.id == account_id)
+            accounts = list(db.scalars(query.order_by(TelegramAccount.id)))
+            if not accounts:
                 return {"connected": False, "status": "not_connected"}
-            return {"connected": account.status == "active", "status": account.status, "telegram_user_id": account.telegram_user_id, "username": account.username, "display_name": account.display_name, "last_connected_at": account.last_connected_at.isoformat() if account.last_connected_at else None, "last_sync_at": account.last_sync_at.isoformat() if account.last_sync_at else None}
+            if account_id is None and len(accounts) > 1:
+                return {"connected": any(account.status == "active" for account in accounts), "status": "multiple", "accounts": [self._account_result(account) for account in accounts]}
+            account = accounts[0]
+            return {"connected": account.status == "active", "status": account.status, "account_id": account.id, "account_label": account.label or "legacy", "telegram_user_id": account.telegram_user_id, "username": account.username, "display_name": account.display_name, "last_connected_at": account.last_connected_at.isoformat() if account.last_connected_at else None, "last_sync_at": account.last_sync_at.isoformat() if account.last_sync_at else None, "last_error": account.last_error}
 
-    def disconnect(self, user_id: int) -> bool:
+    def list_accounts(self, user_id: int) -> list[dict[str, object]]:
         with SessionLocal() as db:
-            account = db.scalar(select(TelegramAccount).where(TelegramAccount.user_id == user_id).with_for_update())
+            return [self._account_result(account) for account in db.scalars(select(TelegramAccount).where(TelegramAccount.user_id == user_id).order_by(TelegramAccount.id))]
+
+    def rename(self, user_id: int, account_id: int, label: str) -> dict[str, object]:
+        label = label.strip()
+        if not label:
+            raise TelegramUserAuthError("Account label is required")
+        with SessionLocal() as db:
+            account = db.scalar(select(TelegramAccount).where(TelegramAccount.id == account_id, TelegramAccount.user_id == user_id).with_for_update())
+            if account is None:
+                raise TelegramUserAuthError("Telegram account was not found")
+            duplicate = db.scalar(select(TelegramAccount).where(TelegramAccount.user_id == user_id, TelegramAccount.label == label, TelegramAccount.id != account_id))
+            if duplicate is not None:
+                raise TelegramUserAuthError("Telegram account label is already in use")
+            account.label = label
+            db.commit()
+            return self._account_result(account)
+
+    def disconnect(self, user_id: int, account_id: int | None = None) -> bool:
+        with SessionLocal() as db:
+            query = select(TelegramAccount).where(TelegramAccount.user_id == user_id)
+            if account_id is not None:
+                query = query.where(TelegramAccount.id == account_id)
+            accounts = list(db.scalars(query.with_for_update()))
+            if account_id is None and len(accounts) > 1:
+                raise TelegramUserAuthError("Multiple Telegram accounts are connected; choose account_id")
+            account = accounts[0] if accounts else None
             if account is None:
                 return False
             account.status = "revoked"
             account.session_ciphertext = None
             db.commit()
             return True
+
+    @staticmethod
+    def _account_result(account: TelegramAccount) -> dict[str, object]:
+        return {"account_id": account.id, "account_label": account.label or "legacy", "connected": account.status == "active", "status": account.status, "telegram_user_id": account.telegram_user_id, "username": account.username, "display_name": account.display_name, "last_connected_at": account.last_connected_at.isoformat() if account.last_connected_at else None, "last_sync_at": account.last_sync_at.isoformat() if account.last_sync_at else None, "last_error": account.last_error}
+
+    def _validate_target(self, user_id: int, account_id: int | None, account_label: str | None) -> None:
+        if account_label is not None and not account_label.strip():
+            raise TelegramUserAuthError("Account label is required")
+        if account_id is None and account_label is None:
+            return
+        with SessionLocal() as db:
+            if account_id is not None and db.scalar(select(TelegramAccount.id).where(TelegramAccount.id == account_id, TelegramAccount.user_id == user_id)) is None:
+                raise TelegramUserAuthError("Telegram account was not found")
+            if account_id is None and account_label is not None and db.scalar(select(TelegramAccount.id).where(TelegramAccount.user_id == user_id, TelegramAccount.label == account_label.strip())) is not None:
+                raise TelegramUserAuthError("Telegram account label is already in use")
+
+    @staticmethod
+    def _flow_scope_filters(account_id: int | None, account_label: str | None):
+        if account_id is not None:
+            return (TelegramAuthFlow.account_id == account_id,)
+        if account_label is not None:
+            return (TelegramAuthFlow.account_label == account_label.strip(),)
+        return ()
 
     def _update_qr_metadata(self, flow_id: UUID, expires_at) -> None:
         with SessionLocal() as db:

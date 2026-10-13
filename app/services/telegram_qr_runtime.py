@@ -35,6 +35,8 @@ class QrRuntime:
 
     user_id: int
     flow_id: UUID
+    account_id: int | None
+    account_label: str | None
     client: Any
     qr_login: Any
     url: str
@@ -73,6 +75,8 @@ class TelegramQrRuntimeManager:
         flow_id: UUID,
         prepared: PreparedQrLogin,
         deadline: datetime,
+        account_id: int | None = None,
+        account_label: str | None = None,
     ) -> None:
         task = asyncio.create_task(
             self._wait(service, user_id, flow_id, prepared, deadline),
@@ -81,6 +85,8 @@ class TelegramQrRuntimeManager:
         self._runtimes[(user_id, flow_id)] = QrRuntime(
             user_id=user_id,
             flow_id=flow_id,
+            account_id=account_id,
+            account_label=account_label,
             client=prepared.client,
             qr_login=prepared.qr_login,
             url=prepared.url,
@@ -89,9 +95,9 @@ class TelegramQrRuntimeManager:
             task=task,
         )
 
-    async def cancel_user(self, user_id: int) -> None:
-        """Cancel every live QR task for a user before starting a new flow."""
-        keys = [key for key in self._runtimes if key[0] == user_id]
+    async def cancel_user(self, user_id: int, account_id: int | None = None, account_label: str | None = None) -> None:
+        """Cancel QR tasks for a legacy user flow or one selected account."""
+        keys = [key for key, runtime in self._runtimes.items() if key[0] == user_id and (account_id is not None and runtime.account_id == account_id or account_id is None and account_label is None or account_id is None and runtime.account_label == account_label)]
         for key in keys:
             await self.cancel(*key)
 
