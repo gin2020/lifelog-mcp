@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     telegram_send_confirmation_ttl_seconds: int = 300
     telegram_max_monitored_dialogues_per_user: int = 10
     telegram_max_messages_per_request: int = 100
+    max_user_worker_enabled: bool = False
+    max_user_worker_poll_interval_seconds: float = 10.0
+    max_user_auth_flow_ttl_seconds: int = 600
+    max_send_confirmation_ttl_seconds: int = 300
+    max_max_messages_per_request: int = 100
+    max_session_encryption_key: SecretStr | None = None
+    max_session_work_dir: str = ".max-sessions"
     jwt_signing_key: SecretStr | None = None
     jwt_access_token_ttl_seconds: int = 3600
     oauth_refresh_token_ttl_seconds: int = 2_592_000
@@ -113,6 +120,24 @@ class Settings(BaseSettings):
             raise ValueError("TELEGRAM_SEND_CONFIRMATION_TTL_SECONDS must be positive")
         if self.telegram_max_messages_per_request <= 0:
             raise ValueError("TELEGRAM_MAX_MESSAGES_PER_REQUEST must be positive")
+        return self
+
+    @model_validator(mode="after")
+    def validate_max_user_api_settings(self) -> "Settings":
+        """Validate encrypted MAX user-session settings when MAX is configured."""
+        configured = self.max_user_worker_enabled or self.max_session_encryption_key is not None
+        if not configured:
+            return self
+        if self.max_session_encryption_key is None or not self.max_session_encryption_key.get_secret_value().strip():
+            raise ValueError("MAX user API is configured but MAX_SESSION_ENCRYPTION_KEY is missing")
+        if self.max_user_worker_poll_interval_seconds <= 0:
+            raise ValueError("MAX_USER_WORKER_POLL_INTERVAL_SECONDS must be positive")
+        if self.max_user_auth_flow_ttl_seconds <= 0:
+            raise ValueError("MAX_USER_AUTH_FLOW_TTL_SECONDS must be positive")
+        if self.max_send_confirmation_ttl_seconds <= 0:
+            raise ValueError("MAX_SEND_CONFIRMATION_TTL_SECONDS must be positive")
+        if self.max_max_messages_per_request <= 0:
+            raise ValueError("MAX_MAX_MESSAGES_PER_REQUEST must be positive")
         return self
 
     @model_validator(mode="after")

@@ -104,8 +104,9 @@ class NotificationDispatcher:
     @staticmethod
     def _message_text(event: NotificationOutbox) -> str:
         """Build a readable notification while keeping Telegram message bodies private."""
-        if event.event_type == "telegram.new_messages":
-            display_name = str(event.payload.get("display_name") or "").strip() or "Контакт Telegram"
+        if event.event_type in {"telegram.new_messages", "max.new_messages"}:
+            default_name = "Контакт MAX" if event.event_type == "max.new_messages" else "Контакт Telegram"
+            display_name = str(event.payload.get("display_name") or "").strip() or default_name
             account_label = str(event.payload.get("account_label") or "").strip()
             account_suffix = f" через аккаунт «{account_label}»" if account_label else ""
             message_count = event.payload.get("message_count", 1)

@@ -24,6 +24,13 @@ from app.db.models.telegram_user import (
     TelegramDialogueMonitor,
     TelegramSendRequest,
 )
+from app.db.models.max_user import (
+    MaxAccount,
+    MaxAllowedChat,
+    MaxAuthFlow,
+    MaxChatMonitor,
+    MaxSendRequest,
+)
 
 __all__ = [
     "Memory",
@@ -42,4 +49,9 @@ __all__ = [
     "TelegramAllowedPeer",
     "TelegramDialogueMonitor",
     "TelegramSendRequest",
+    "MaxAccount",
+    "MaxAuthFlow",
+    "MaxAllowedChat",
+    "MaxChatMonitor",
+    "MaxSendRequest",
 ]

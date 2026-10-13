@@ -9,6 +9,7 @@ from app.tools import system  # noqa: F401 - регистрация инстру
 from app.tools import finance
 from app.tools import query_finance
 from app.tools import telegram_user  # noqa: F401 - Telegram User API tools
+from app.tools import max_user  # noqa: F401 - MAX personal User API tools
 
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")

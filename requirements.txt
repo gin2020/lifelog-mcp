@@ -6,4 +6,5 @@ httpx>=0.27,<1.0
 PyJWT[crypto]>=2.10,<3.0
 cryptography>=43.0,<50.0
 Telethon>=1.45,<1.46
+maxapi-python>=2.1,<3.0
 pytest>=8.0,<9.0

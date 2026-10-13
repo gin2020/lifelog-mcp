@@ -1317,7 +1317,29 @@ Telegram не является authoritative storage для пользовате
 
 ---
 
-## 33. Summary
+## 33. MAX Personal Account Layer
+
+MAX подключается отдельным user-client слоем, не через MAX Bot API. Текущий адаптер использует reverse-engineered библиотеку `maxapi-python` (PyMax): транспорт PyMax — WebSocket к MAX, а первичная авторизация выполняется QR-потоком библиотеки.
+
+```text
+MCP max_connect(qr_start)
+        ↓
+PyMax WebClient + QR URL
+        ↓ scan / confirm on MAX phone
+on_start callback
+        ↓
+SQLite PyMax session file
+        ↓ encrypt with MAX_SESSION_ENCRYPTION_KEY
+MaxAccount.session_ciphertext
+```
+
+Live `WebClient` и QR runtime остаются в памяти процесса. На диске LifeLog хранит только зашифрованный SQLite-файл сессии; при следующем запуске он временно расшифровывается в приватный каталог процесса, передаётся PyMax и снова удаляется при закрытии клиента.
+
+`MaxUserWorker` поддерживает постоянный WebSocket-клиент на каждый аккаунт с активным монитором и пишет входящие события в общий `notification_outbox`. Для разовой работы MCP-инструменты открывают короткоживущий клиент, читают список чатов/историю или отправляют сообщение. Отправка проходит через allowlist чата и двухшаговый encrypted send request с подтверждением.
+
+В отличие от Telegram MTProto, у MAX нет стабильного публичного user-client протокола или официального API для этой схемы. Поэтому эта интеграция является экспериментальной: QR/session формат, WebSocket API, device fingerprinting и серверные проверки могут измениться после обновления MAX или привести к отзыву сессии. Сессию нужно считать эквивалентом полномочий личного аккаунта и защищать как секрет.
+
+## 34. Summary
 
 LifeLog MCP архитектурно представляет собой связку:
 
