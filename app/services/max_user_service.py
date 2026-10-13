@@ -62,9 +62,21 @@ class MaxUserService:
             chats = await self._api.get_chats(handle.client)
         folded = query.strip().casefold() if query else None
         return [
-            {"account_id": account.id, "account_label": account.label, "max_chat_id": chat.max_chat_id, "display_name": chat.display_name, "chat_type": chat.chat_type}
+            {
+                "account_id": account.id,
+                "account_label": account.label,
+                "max_chat_id": chat.max_chat_id,
+                "display_name": chat.display_name,
+                "chat_type": chat.chat_type,
+                "max_user_id": chat.max_user_id,
+                "username": chat.username,
+                "phone": chat.phone,
+                "profile_link": chat.profile_link,
+                "participant_ids": list(chat.participant_ids),
+                "contact_found": chat.contact_found,
+            }
             for chat in chats
-            if folded is None or folded in chat.display_name.casefold() or folded in str(chat.max_chat_id)
+            if folded is None or self._chat_matches(chat, folded)
         ]
 
     async def add_allowed_chat(self, user_id: int, max_chat_id: int, account_id: int | None = None) -> dict[str, object]:
@@ -82,7 +94,15 @@ class MaxUserService:
             allowed.chat_type = chat.chat_type
             allowed.is_enabled = True
             db.commit()
-            return self._allowed_result(allowed, account)
+            return {
+                **self._allowed_result(allowed, account),
+                "max_user_id": chat.max_user_id,
+                "username": chat.username,
+                "phone": chat.phone,
+                "profile_link": chat.profile_link,
+                "participant_ids": list(chat.participant_ids),
+                "contact_found": chat.contact_found,
+            }
 
     def list_allowed_chats(self, user_id: int, account_id: int | None = None) -> list[dict[str, object]]:
         with SessionLocal() as db:
@@ -237,6 +257,29 @@ class MaxUserService:
     @staticmethod
     def _allowed_result(chat: MaxAllowedChat, account: MaxAccount) -> dict[str, object]:
         return {"allowed_chat_id": chat.id, "account_id": account.id, "account_label": account.label, "max_chat_id": chat.max_chat_id, "display_name": chat.display_name, "chat_type": chat.chat_type, "is_enabled": chat.is_enabled}
+
+    @staticmethod
+    def _chat_matches(chat: MaxChat, query: str) -> bool:
+        """Match a chat against every identity field returned by MAX."""
+        normalized_query = query.lstrip("@").casefold()
+        values = (
+            chat.display_name,
+            chat.username,
+            chat.phone,
+            chat.profile_link,
+            chat.max_user_id,
+            chat.max_chat_id,
+            *chat.participant_ids,
+        )
+        text = " ".join(str(value).casefold() for value in values if value is not None)
+        if normalized_query in text or query in text:
+            return True
+
+        # MAX returns phone as an integer in the current PyMax model.  Ignore
+        # separators when a caller searches using a formatted phone number.
+        query_digits = "".join(character for character in query if character.isdigit())
+        phone_digits = "".join(character for character in (chat.phone or "") if character.isdigit())
+        return bool(query_digits and phone_digits and query_digits in phone_digits)
 
     @staticmethod
     def _message_result(message: dict[str, object], chat: MaxAllowedChat, account: MaxAccount) -> dict[str, object]:

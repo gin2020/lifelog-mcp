@@ -2,11 +2,15 @@
 
 from dataclasses import dataclass
 import json
+import logging
 from pathlib import Path
 import tempfile
 from typing import Any, Callable
 
 from app.config.settings import Settings, get_settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class MaxUserApiError(RuntimeError):
@@ -62,6 +66,12 @@ class MaxChat:
     max_chat_id: int
     display_name: str
     chat_type: str | None
+    max_user_id: int | None = None
+    username: str | None = None
+    phone: str | None = None
+    profile_link: str | None = None
+    participant_ids: tuple[int, ...] = ()
+    contact_found: bool = False
 
 
 class MaxUserApi:
@@ -154,9 +164,12 @@ class MaxUserApi:
             chats = await client.fetch_chats()
         except Exception as error:
             raise translate_max_error(error, "loading MAX chats") from error
+        raw_chats = list(chats or [])
+        user_ids = MaxUserApi.chat_user_ids(raw_chats)
+        users = await MaxUserApi._load_users(client, user_ids)
         result: list[MaxChat] = []
-        for chat in chats or []:
-            normalized = MaxUserApi.chat_from_object(chat)
+        for chat in raw_chats:
+            normalized = MaxUserApi.chat_from_object(chat, users=users, own_user_id=MaxUserApi.own_user_id(client))
             if normalized is not None:
                 result.append(normalized)
         return result
@@ -191,30 +204,161 @@ class MaxUserApi:
         profile = getattr(client, "me", None)
         raw = MaxUserApi.as_dict(profile)
         contact = raw.get("contact") if isinstance(raw.get("contact"), dict) else raw
-        user_id = MaxUserApi.numeric(contact.get("id")) or MaxUserApi.numeric(raw.get("id"))
-        names = contact.get("names") or raw.get("names") or []
-        display_name = contact.get("display_name") or contact.get("name") or raw.get("display_name")
-        if not display_name and names and isinstance(names[0], dict):
-            display_name = names[0].get("name") or " ".join(
-                part for part in (names[0].get("firstName"), names[0].get("lastName")) if part
-            )
+        normalized = MaxUserApi.user_from_object(contact or raw)
         return {
-            "max_user_id": user_id,
-            "phone": contact.get("phone") or raw.get("phone"),
-            "display_name": str(display_name or user_id or "MAX user"),
-            "username": contact.get("username") or raw.get("username"),
+            "max_user_id": normalized.get("max_user_id"),
+            "phone": normalized.get("phone"),
+            "display_name": str(normalized.get("display_name") or normalized.get("max_user_id") or "MAX user"),
+            "username": normalized.get("username"),
         }
 
     @staticmethod
-    def chat_from_object(chat: Any) -> MaxChat | None:
+    def chat_from_object(
+        chat: Any,
+        *,
+        users: dict[int, dict[str, Any]] | None = None,
+        own_user_id: int | None = None,
+    ) -> MaxChat | None:
         raw = MaxUserApi.as_dict(chat)
         chat_id = MaxUserApi.numeric(raw.get("id")) or MaxUserApi.numeric(raw.get("chat_id"))
         if chat_id is None:
             return None
+        participant_ids = MaxUserApi._participant_ids(raw)
+        chat_type = MaxUserApi._string_value(raw.get("type"))
+        peer_id = MaxUserApi._dialog_peer_id(raw, participant_ids, own_user_id)
+        profile = (users or {}).get(peer_id) if peer_id is not None else None
         title = raw.get("title") or raw.get("name") or raw.get("display_name")
+        if not title and profile:
+            title = profile.get("display_name") or profile.get("username") or profile.get("phone")
         if not title:
-            title = f"MAX chat {chat_id}"
-        return MaxChat(chat_id, str(title), raw.get("type"))
+            title = f"MAX chat {chat_id} (имя недоступно)"
+        return MaxChat(
+            max_chat_id=chat_id,
+            display_name=str(title),
+            chat_type=chat_type,
+            max_user_id=peer_id,
+            username=profile.get("username") if profile else None,
+            phone=profile.get("phone") if profile else None,
+            profile_link=profile.get("profile_link") if profile else None,
+            participant_ids=tuple(participant_ids),
+            contact_found=profile is not None,
+        )
+
+    @staticmethod
+    def chat_user_ids(chats: list[Any]) -> list[int]:
+        """Collect participant IDs once so contact enrichment is batched."""
+        result: set[int] = set()
+        for chat in chats:
+            raw = MaxUserApi.as_dict(chat)
+            result.update(MaxUserApi._participant_ids(raw))
+            owner = MaxUserApi.numeric(raw.get("owner"))
+            if owner is not None:
+                result.add(owner)
+        return sorted(result)
+
+    @staticmethod
+    async def _load_users(client: Any, user_ids: list[int]) -> dict[int, dict[str, Any]]:
+        if not user_ids:
+            return {}
+        users: dict[int, dict[str, Any]] = {}
+
+        # ``get_users`` uses PyMax's cache and makes one request for all misses.
+        # The fallbacks keep the adapter usable with older PyMax versions and
+        # with small test doubles.
+        get_users = getattr(client, "get_users", None) or getattr(client, "fetch_users", None)
+        if callable(get_users):
+            try:
+                values = await get_users(user_ids)
+            except Exception as error:
+                logger.warning("MAX contact enrichment failed type=%s", error.__class__.__name__)
+                values = []
+            for value in values or []:
+                normalized = MaxUserApi.user_from_object(value)
+                if normalized.get("max_user_id") is not None:
+                    users[normalized["max_user_id"]] = normalized
+
+        for value in MaxUserApi._cached_user_values(client):
+            normalized = MaxUserApi.user_from_object(value)
+            if normalized.get("max_user_id") is not None:
+                users.setdefault(normalized["max_user_id"], normalized)
+        return users
+
+    @staticmethod
+    def _cached_user_values(client: Any) -> list[Any]:
+        values: list[Any] = []
+        contacts = getattr(client, "contacts", None)
+        if isinstance(contacts, (list, tuple)):
+            values.extend(value for value in contacts if value is not None)
+        profile = getattr(client, "me", None)
+        profile_raw = MaxUserApi.as_dict(profile)
+        contact = profile_raw.get("contact") if isinstance(profile_raw.get("contact"), dict) else None
+        if contact:
+            values.append(contact)
+        return values
+
+    @staticmethod
+    def user_from_object(user: Any) -> dict[str, Any]:
+        raw = MaxUserApi.as_dict(user)
+        user_id = MaxUserApi.numeric(raw.get("id")) or MaxUserApi.numeric(raw.get("user_id"))
+        names = raw.get("names") or []
+        display_name = raw.get("display_name") or raw.get("name")
+        if not display_name:
+            for name in names:
+                name_raw = MaxUserApi.as_dict(name)
+                display_name = name_raw.get("name") or " ".join(
+                    part for part in (
+                        name_raw.get("first_name") or name_raw.get("firstName"),
+                        name_raw.get("last_name") or name_raw.get("lastName"),
+                    ) if part
+                )
+                if display_name:
+                    break
+        username = raw.get("username") or raw.get("user_name") or raw.get("handle")
+        if username is not None:
+            username = str(username).lstrip("@")
+        phone = raw.get("phone")
+        profile_link = raw.get("link") or raw.get("profile_link")
+        return {
+            "max_user_id": user_id,
+            "display_name": str(display_name) if display_name else None,
+            "username": username,
+            "phone": str(phone) if phone is not None else None,
+            "profile_link": str(profile_link) if profile_link is not None else None,
+        }
+
+    @staticmethod
+    def own_user_id(client: Any) -> int | None:
+        profile = getattr(client, "me", None)
+        raw = MaxUserApi.as_dict(profile)
+        contact = raw.get("contact") if isinstance(raw.get("contact"), dict) else raw
+        return MaxUserApi.numeric(contact.get("id")) or MaxUserApi.numeric(raw.get("id"))
+
+    @staticmethod
+    def _participant_ids(raw: dict[str, Any]) -> list[int]:
+        participants = raw.get("participants") or {}
+        values = participants.keys() if isinstance(participants, dict) else participants
+        result = {value for value in (MaxUserApi.numeric(item) for item in values or []) if value is not None}
+        owner = MaxUserApi.numeric(raw.get("owner"))
+        if owner is not None:
+            result.add(owner)
+        return sorted(result)
+
+    @staticmethod
+    def _dialog_peer_id(raw: dict[str, Any], participant_ids: list[int], own_user_id: int | None) -> int | None:
+        chat_type = MaxUserApi._string_value(raw.get("type"))
+        if chat_type and chat_type.upper() not in {"DIALOG", "USER"}:
+            return None
+        candidates = [user_id for user_id in participant_ids if user_id != own_user_id]
+        if candidates:
+            return candidates[0]
+        owner = MaxUserApi.numeric(raw.get("owner"))
+        return owner if owner is not None and owner != own_user_id else None
+
+    @staticmethod
+    def _string_value(value: Any) -> str | None:
+        if value is None:
+            return None
+        return str(value.value if hasattr(value, "value") else value)
 
     @staticmethod
     def message_from_object(message: Any, fallback_chat_id: int | None = None) -> dict[str, Any]:

@@ -66,6 +66,59 @@ class MaxUserApiTestCase(unittest.TestCase):
         self.assertEqual(message_id, 9)
         self.assertEqual(client.send_kwargs["chat_id"], 100)
 
+    def test_dialogs_are_enriched_from_participants_in_one_batch(self) -> None:
+        class ContactClient:
+            me = SimpleNamespace(contact=SimpleNamespace(id=1))
+
+            async def fetch_chats(self):
+                return [
+                    SimpleNamespace(id=100, type="DIALOG", owner=1, participants={1: 0, 42: 0}),
+                    SimpleNamespace(id=200, type="CHAT", owner=1, participants={1: 0, 77: 0}, title="Рабочая группа"),
+                ]
+
+            async def get_users(self, user_ids):
+                self.requested_user_ids = user_ids
+                return [
+                    SimpleNamespace(
+                        id=42,
+                        names=[SimpleNamespace(first_name="Никита", last_name="MTS")],
+                        phone=79991234567,
+                        username="nikita_mts",
+                        link="max.ru/nikita_mts",
+                    )
+                ]
+
+        client = ContactClient()
+        chats = asyncio.run(MaxUserApi.get_chats(client))
+
+        self.assertEqual(client.requested_user_ids, [1, 42, 77])
+        self.assertEqual(chats[0].max_user_id, 42)
+        self.assertEqual(chats[0].display_name, "Никита MTS")
+        self.assertEqual(chats[0].username, "nikita_mts")
+        self.assertEqual(chats[0].phone, "79991234567")
+        self.assertEqual(chats[0].profile_link, "max.ru/nikita_mts")
+        self.assertEqual(chats[0].participant_ids, (1, 42))
+        self.assertTrue(chats[0].contact_found)
+        self.assertEqual(chats[1].display_name, "Рабочая группа")
+        self.assertIsNone(chats[1].max_user_id)
+
+    def test_missing_profile_keeps_ids_and_marks_name_unavailable(self) -> None:
+        class ContactClient:
+            me = SimpleNamespace(contact=SimpleNamespace(id=1))
+
+            async def fetch_chats(self):
+                return [SimpleNamespace(id=100, type="DIALOG", owner=1, participants={1: 0, 42: 0})]
+
+            async def get_users(self, user_ids):
+                return []
+
+        chat = asyncio.run(MaxUserApi.get_chats(ContactClient()))[0]
+        self.assertEqual(chat.max_chat_id, 100)
+        self.assertEqual(chat.max_user_id, 42)
+        self.assertEqual(chat.participant_ids, (1, 42))
+        self.assertIn("имя недоступно", chat.display_name)
+        self.assertFalse(chat.contact_found)
+
     def test_qr_handler_does_not_log_or_print_url(self) -> None:
         handler = MaxQrHandler()
         asyncio.run(handler.show_qr("max://qr/secret"))
