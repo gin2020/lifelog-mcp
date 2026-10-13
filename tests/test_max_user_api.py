@@ -7,6 +7,9 @@ import unittest
 
 from cryptography.fernet import Fernet
 from pydantic import SecretStr
+from pymax.types.domain.attachments import PhotoAttachment
+from pymax.types.domain.element import Element, ElementAttributes
+from pymax.types.domain.message import Message
 
 from app.config.settings import Settings
 from app.services.max_session_crypto import MaxSessionCrypto
@@ -88,6 +91,7 @@ class MaxUserApiTestCase(unittest.TestCase):
                 "id": 9,
                 "chat_id": 100,
                 "text": b"\xff\xd0\x9f",
+                "stats": {"opaque": b"\xfe\x01"},
                 "attaches": [{
                     "caption": b"\xd0\x94\xd0\xbe\xd0\xba\x1f",
                     "file_data": b"\xff\x00\x80",
@@ -99,9 +103,92 @@ class MaxUserApiTestCase(unittest.TestCase):
         self.assertEqual(normalized["text"], "�П")
         attachment = normalized["raw"]["attaches"][0]
         self.assertEqual(attachment["caption"], "Док\x1f")
-        self.assertEqual(attachment["file_data"]["__lifelog_type"], "bytes")
-        self.assertEqual(attachment["file_data"]["encoding"], "base64")
-        self.assertEqual(attachment["file_data"]["data"], "/wCA")
+        self.assertNotIn("file_data", attachment)
+        self.assertEqual(normalized["raw"]["stats"]["opaque"]["__lifelog_type"], "bytes")
+
+    def test_photo_message_identifies_image_without_serializing_preview_bytes(self) -> None:
+        message = Message(
+            id=10,
+            chat_id=100,
+            sender=42,
+            text="",
+            time=10,
+            type="MESSAGE",
+            attaches=[PhotoAttachment(
+                type="PHOTO",
+                baseUrl="https://cdn.example/photo",
+                height=480,
+                width=640,
+                photoId=99,
+                photoToken="private-token",
+                previewData=b"\xff\x00\x80",
+            )],
+        )
+        raw = MaxUserApi.as_dict(message)
+        with self.assertRaises(TypeError):
+            json.dumps(raw, ensure_ascii=False)
+
+        normalized = MaxUserApi.message_from_object(message)
+        json.dumps(normalized, ensure_ascii=False)
+        self.assertIsNone(normalized["text"])
+        attachment = normalized["raw"]["attaches"][0]
+        self.assertEqual(attachment["type"], "PHOTO")
+        self.assertEqual(attachment["photo_id"], 99)
+        self.assertEqual(attachment["base_url"], "https://cdn.example/photo")
+        self.assertEqual(attachment["width"], 640)
+        self.assertEqual(attachment["height"], 480)
+        self.assertNotIn("preview_data", attachment)
+        self.assertNotIn("photo_token", attachment)
+
+    def test_message_elements_are_preserved_and_json_safe(self) -> None:
+        message = Message(
+            id=11,
+            chat_id=100,
+            sender=42,
+            text="ссылка",
+            time=11,
+            type="MESSAGE",
+            elements=[Element(
+                type="LINK",
+                from_=0,
+                length=6,
+                attributes=ElementAttributes(url="https://example.test"),
+            )],
+        )
+        normalized = MaxUserApi.message_from_object(message)
+        json.dumps(normalized, ensure_ascii=False)
+        self.assertEqual(normalized["raw"]["elements"][0]["type"], "LINK")
+        self.assertEqual(normalized["raw"]["elements"][0]["attributes"]["url"], "https://example.test")
+
+    def test_history_with_text_and_photo_is_json_safe_for_larger_limits(self) -> None:
+        class HistoryClient:
+            async def fetch_history(self, **kwargs):
+                return [
+                    Message(id=20, chat_id=100, sender=42, text="Тест", time=20, type="MESSAGE"),
+                    Message(
+                        id=21,
+                        chat_id=100,
+                        sender=42,
+                        text="",
+                        time=21,
+                        type="MESSAGE",
+                        attaches=[PhotoAttachment(
+                            type="PHOTO",
+                            baseUrl="https://cdn.example/photo",
+                            height=10,
+                            width=20,
+                            photoId=123,
+                            photoToken="private-token",
+                            previewData=b"\xff\x00",
+                        )],
+                    ),
+                ]
+
+        messages = asyncio.run(MaxUserApi.get_history(HistoryClient(), 100, 10))
+        json.dumps(messages, ensure_ascii=False)
+        self.assertEqual(messages[0]["text"], "Тест")
+        self.assertEqual(messages[1]["raw"]["attaches"][0]["type"], "PHOTO")
+        self.assertIsNone(messages[1]["text"])
 
     def test_history_passes_different_limits_to_pymax(self) -> None:
         class HistoryClient:

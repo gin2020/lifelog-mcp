@@ -375,6 +375,9 @@ class MaxUserApi:
         sender_raw = MaxUserApi.as_dict(sender) if sender is not None else {}
         sender_id = MaxUserApi.numeric(sender) or MaxUserApi.numeric(sender_raw.get("id")) or MaxUserApi.numeric(raw.get("sender_id"))
         text = raw.get("text") or raw.get("body")
+        safe_raw = dict(raw)
+        if isinstance(raw.get("attaches"), (list, tuple)):
+            safe_raw["attaches"] = [MaxUserApi._attachment_safe(item) for item in raw["attaches"]]
         return {
             "id": message_id,
             "chat_id": chat_id,
@@ -385,7 +388,7 @@ class MaxUserApi:
                 key="time",
             ),
             "out": bool(raw.get("out") or raw.get("is_out") or raw.get("from_me")),
-            "raw": MaxUserApi._json_safe(raw),
+            "raw": MaxUserApi._json_safe(safe_raw),
         }
 
     _TEXT_BYTE_KEYS = frozenset({
@@ -401,6 +404,16 @@ class MaxUserApi:
         "text",
         "title",
         "username",
+    })
+    _ATTACHMENT_METADATA_KEYS = frozenset({
+        "_type", "type", "audio_id", "audio_type", "author_type", "base_url",
+        "call_type", "caption", "contact_id", "contact_ids", "conversation_id",
+        "description", "duration", "event", "file_id", "first_name", "height",
+        "hangup_type", "image", "last_name", "length", "link", "lottie_url",
+        "name", "photo_id", "photo_url", "poll_id", "set_id", "size", "state",
+        "sticker_id", "sticker_type", "tags", "text", "thumbnail", "title",
+        "transcription_status", "url", "version", "video_id", "video_type",
+        "wave", "width",
     })
 
     @staticmethod
@@ -451,6 +464,27 @@ class MaxUserApi:
         # Unknown optional objects must not make the complete MCP result
         # unserializable. Keep a diagnostic marker, never the object itself.
         return {"__lifelog_type": "unsupported", "class": value.__class__.__name__}
+
+    @staticmethod
+    def _attachment_safe(attachment: Any) -> dict[str, Any]:
+        """Keep attachment metadata and omit previews, payloads, and tokens."""
+        raw = MaxUserApi.as_dict(attachment)
+        result: dict[str, Any] = {}
+        for raw_key, raw_value in raw.items():
+            key = raw_key if isinstance(raw_key, str) else str(raw_key)
+            if key not in MaxUserApi._ATTACHMENT_METADATA_KEYS:
+                continue
+            if key == "image" and isinstance(raw_value, Mapping):
+                result[key] = MaxUserApi._attachment_safe(raw_value)
+            else:
+                result[key] = MaxUserApi._json_safe(raw_value, key=key)
+        if not result and raw:
+            attachment_type = raw.get("type") or raw.get("_type")
+            if attachment_type is not None:
+                result["type"] = MaxUserApi._json_safe(attachment_type, key="type")
+            else:
+                result.update({"type": "UNKNOWN", "metadata_unavailable": True})
+        return result
 
     @staticmethod
     def as_dict(value: Any) -> dict[str, Any]:
