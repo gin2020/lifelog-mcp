@@ -17,6 +17,17 @@ class MaxUserApiError(RuntimeError):
         self.code = code
 
 
+class MaxTwoFactorRequiredError(RuntimeError):
+    """Raised instead of blocking on PyMax's interactive console provider."""
+
+
+class MaxNonInteractivePasswordProvider:
+    """Fail safely when MAX requests a password on a headless server."""
+
+    async def get_password(self, hint: str | None = None) -> str:
+        raise MaxTwoFactorRequiredError("MAX requested a 2FA password")
+
+
 @dataclass
 class MaxClientHandle:
     """A PyMax client and its private plaintext session workspace."""
@@ -24,6 +35,7 @@ class MaxClientHandle:
     client: Any
     temp_dir: tempfile.TemporaryDirectory
     session_path: Path
+    _closed: bool = False
 
     def read_session(self) -> bytes | None:
         try:
@@ -32,6 +44,9 @@ class MaxClientHandle:
             raise MaxUserApiError("MAX session could not be read", code="session_read_failed") from error
 
     async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         try:
             close = getattr(self.client, "close", None) or getattr(self.client, "stop", None)
             if close is not None:
@@ -104,6 +119,12 @@ class MaxUserApi:
             }
             if qr_provider is not None:
                 kwargs["qr_provider"] = qr_provider
+                from pymax import QrAuthFlow
+
+                kwargs["auth_flow"] = QrAuthFlow(
+                    qr_provider,
+                    password_provider=MaxNonInteractivePasswordProvider(),
+                )
             client = self._factory()(**kwargs)
             return MaxClientHandle(client, temp_dir, session_path)
         except MaxUserApiError:
@@ -244,11 +265,24 @@ class MaxUserApi:
 
 
 def translate_max_error(error: Exception, operation: str) -> MaxUserApiError:
+    if isinstance(error, MaxUserApiError):
+        return error
+    if isinstance(error, MaxTwoFactorRequiredError):
+        return MaxUserApiError(
+            "MAX requires a 2FA password; headless QR authorization cannot continue",
+            code="2fa_required",
+        )
+    if isinstance(error, (ConnectionError, EOFError, OSError)):
+        return MaxUserApiError(f"MAX connection failed while {operation}", code="connection_error")
+    if isinstance(error, (TimeoutError,)):
+        return MaxUserApiError(f"MAX timed out while {operation}", code="timeout")
     name = error.__class__.__name__
     if name in {"InvalidTokenError", "AuthError", "LoginTokenInvalidError"}:
         return MaxUserApiError("The MAX session is no longer authorized", code="session_invalid")
     if name in {"QrExpiredError", "AuthTrackExpiredError"}:
         return MaxUserApiError("The MAX QR code expired; start a new authorization flow", code="qr_expired")
-    if name in {"TimeoutError", "ConnectTimeout"}:
-        return MaxUserApiError(f"MAX timed out while {operation}", code="timeout")
+    if name == "RuntimeError" and str(error) == "QR authentication expired":
+        return MaxUserApiError("The MAX QR code expired; start a new authorization flow", code="qr_expired")
+    if name in {"ApiError", "PasswordAttemptsExceededError"}:
+        return MaxUserApiError(f"MAX authorization failed while {operation}", code="auth_error")
     return MaxUserApiError(f"MAX operation failed while {operation}", code="max_error")

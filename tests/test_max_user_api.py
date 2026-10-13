@@ -9,7 +9,7 @@ from pydantic import SecretStr
 
 from app.config.settings import Settings
 from app.services.max_session_crypto import MaxSessionCrypto
-from app.services.max_user_api import MaxUserApi
+from app.services.max_user_api import MaxNonInteractivePasswordProvider, MaxTwoFactorRequiredError, MaxUserApi, translate_max_error
 from app.services.max_user_auth import MaxQrHandler
 
 
@@ -71,3 +71,20 @@ class MaxUserApiTestCase(unittest.TestCase):
         asyncio.run(handler.show_qr("max://qr/secret"))
         self.assertEqual(handler.url, "max://qr/secret")
         self.assertTrue(handler.ready.is_set())
+
+    def test_real_pymax_qr_client_uses_noninteractive_auth_flow(self) -> None:
+        handler = MaxQrHandler()
+        api = MaxUserApi(self.settings)
+        handle = api.create_client(qr_provider=handler)
+        try:
+            self.assertEqual(handle.client._auth_flow.__class__.__name__, "QrAuthFlow")
+            password_provider = handle.client._auth_flow.password_provider
+            with self.assertRaises(MaxTwoFactorRequiredError):
+                asyncio.run(password_provider.get_password("hint"))
+        finally:
+            asyncio.run(handle.close())
+
+    def test_pymax_error_translation_is_safe_and_specific(self) -> None:
+        translated = translate_max_error(RuntimeError("QR authentication expired"), "starting QR")
+        self.assertEqual(translated.code, "qr_expired")
+        self.assertNotIn("QR authentication expired", str(translated))

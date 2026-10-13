@@ -1,6 +1,7 @@
 """Staged QR authorization and encrypted session persistence for MAX."""
 
 import asyncio
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 import logging
 from uuid import UUID, uuid4
@@ -15,6 +16,18 @@ from app.services.max_user_api import MaxClientHandle, MaxUserApi, MaxUserApiErr
 
 
 logger = logging.getLogger(__name__)
+
+_FLOW_FAILURE_CODES = {
+    "qr_unavailable",
+    "qr_expired",
+    "connection_error",
+    "timeout",
+    "session_invalid",
+    "auth_error",
+    "2fa_required",
+    "identity_missing",
+    "max_error",
+}
 
 
 class MaxUserAuthError(RuntimeError):
@@ -49,6 +62,7 @@ class MaxQrRuntime:
         self.deadline = deadline
         self.authorized = asyncio.Event()
         self.task: asyncio.Task | None = None
+        self.client_task: asyncio.Task | None = None
 
 
 class MaxQrRuntimeManager:
@@ -89,6 +103,8 @@ class MaxQrRuntimeManager:
                 await runtime.task
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                pass
         await runtime.handle.close()
 
 
@@ -112,54 +128,162 @@ class MaxUserAuthService:
         qr = MaxQrHandler()
         handle = self._api.create_client(qr_provider=qr)
         runtime = MaxQrRuntime(user_id, flow_id, handle, qr, deadline)
-
-        with SessionLocal() as db:
-            self._cancel_active_flows(db, user_id, account_id, account_label)
-            db.add(MaxAuthFlow(
-                id=flow_id,
-                user_id=user_id,
-                account_id=account_id,
-                account_label=account_label.strip() if account_label else None,
-                status="qr_code_required",
-                expires_at=deadline,
-            ))
-            db.commit()
-
-        @handle.client.on_start()
-        async def _authorized(_client) -> None:
-            runtime.authorized.set()
-
-        runtime.task = asyncio.create_task(self._run_qr(runtime, account_id, account_label), name=f"max-qr-{user_id}-{flow_id}")
-        max_qr_runtime._runtimes[(user_id, flow_id)] = runtime
         try:
-            await asyncio.wait_for(qr.ready.wait(), timeout=min(30, self._settings.max_user_auth_flow_ttl_seconds))
-        except asyncio.TimeoutError as error:
+            with SessionLocal() as db:
+                self._cancel_active_flows(db, user_id, account_id, account_label)
+                db.add(MaxAuthFlow(
+                    id=flow_id,
+                    user_id=user_id,
+                    account_id=account_id,
+                    account_label=account_label.strip() if account_label else None,
+                    status="qr_code_required",
+                    expires_at=deadline,
+                ))
+                db.commit()
+
+            @handle.client.on_start()
+            async def _authorized(_client) -> None:
+                runtime.authorized.set()
+
+            max_qr_runtime._runtimes[(user_id, flow_id)] = runtime
+            runtime.task = asyncio.create_task(self._run_qr(runtime, account_id, account_label), name=f"max-qr-{user_id}-{flow_id}")
+            runtime.task.add_done_callback(self._consume_task_exception)
+        except Exception:
+            max_qr_runtime._runtimes.pop((user_id, flow_id), None)
+            await handle.close()
+            raise
+
+        qr_wait = asyncio.create_task(qr.ready.wait(), name=f"max-qr-ready-{flow_id}")
+        try:
+            done, _ = await asyncio.wait(
+                {qr_wait, runtime.task},
+                timeout=min(30, self._settings.max_user_auth_flow_ttl_seconds),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if runtime.task in done:
+                self._raise_task_error(runtime.task)
+                result = await self.qr_status(user_id, flow_id)
+                if result.get("status") == "connected":
+                    return result
+                raise MaxUserAuthError("MAX QR authorization ended before returning a QR code", code="qr_unavailable")
+            if qr_wait not in done:
+                self._mark_flow_failure(flow_id, "qr_unavailable")
+                raise MaxUserAuthError("MAX did not return a QR code", code="qr_unavailable")
+        except MaxUserAuthError:
             await max_qr_runtime.cancel(user_id, flow_id)
-            raise MaxUserAuthError("MAX did not return a QR code", code="qr_unavailable") from error
-        if runtime.task.done() and runtime.task.exception() is not None:
-            error = runtime.task.exception()
-            await max_qr_runtime.cancel(user_id, flow_id)
-            raise MaxUserAuthError(str(error), code=getattr(error, "code", "max_auth_error")) from error
+            raise
+        finally:
+            if not qr_wait.done():
+                qr_wait.cancel()
+            with suppress(asyncio.CancelledError):
+                await qr_wait
 
         return {"flow_id": str(flow_id), "status": "qr_code_required", "qr_url": qr.url, "expires_at": deadline.isoformat()}
 
     async def _run_qr(self, runtime: MaxQrRuntime, account_id: int | None, account_label: str | None) -> None:
+        runtime.client_task = asyncio.create_task(self._api.start(runtime.handle), name=f"max-client-{runtime.flow_id}")
+        authorized_wait: asyncio.Task | None = None
         try:
-            await asyncio.wait_for(runtime.authorized.wait(), timeout=max(1, (runtime.deadline - datetime.now(timezone.utc)).total_seconds()))
+            authorized_wait = asyncio.create_task(runtime.authorized.wait(), name=f"max-authorized-{runtime.flow_id}")
+            done, _ = await asyncio.wait(
+                {authorized_wait, runtime.client_task},
+                timeout=max(1, (runtime.deadline - datetime.now(timezone.utc)).total_seconds()),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if not done:
+                raise MaxUserAuthError("The MAX QR code expired; start a new authorization flow", code="qr_expired")
+            if runtime.client_task in done:
+                self._raise_task_error(runtime.client_task)
+                if not runtime.authorized.is_set():
+                    raise MaxUserAuthError("MAX authorization ended before login", code="auth_error")
             await self._finish(runtime, account_id, account_label)
         except asyncio.CancelledError:
             raise
-        except MaxUserAuthError:
-            self._expire_flow(runtime.flow_id)
-            raise
         except Exception as error:
-            self._expire_flow(runtime.flow_id)
-            logger.info("MAX QR authorization failed: user_id=%s flow_id=%s error=%s", runtime.user_id, runtime.flow_id, error.__class__.__name__)
+            safe_error = self._safe_auth_error(error)
+            self._mark_flow_failure(runtime.flow_id, safe_error.code)
+            logger.info(
+                "MAX QR authorization failed: user_id=%s flow_id=%s error_code=%s exception_class=%s",
+                runtime.user_id,
+                runtime.flow_id,
+                safe_error.code,
+                error.__class__.__name__,
+            )
+            raise safe_error from error
         finally:
-            try:
+            if authorized_wait is not None and not authorized_wait.done():
+                authorized_wait.cancel()
+            if authorized_wait is not None:
+                with suppress(asyncio.CancelledError):
+                    await authorized_wait
+            await self._stop_runtime_client(runtime)
+            max_qr_runtime._runtimes.pop((runtime.user_id, runtime.flow_id), None)
+
+    async def _stop_runtime_client(self, runtime: MaxQrRuntime) -> None:
+        client_task = runtime.client_task
+        if client_task is not None and not client_task.done():
+            with suppress(Exception):
                 await runtime.handle.close()
-            finally:
-                max_qr_runtime._runtimes.pop((runtime.user_id, runtime.flow_id), None)
+            try:
+                await asyncio.wait_for(asyncio.shield(client_task), timeout=5)
+            except asyncio.TimeoutError:
+                client_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await client_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+        elif client_task is not None:
+            with suppress(asyncio.CancelledError, Exception):
+                await client_task
+        with suppress(Exception):
+            await runtime.handle.close()
+
+    @staticmethod
+    def _safe_auth_error(error: Exception) -> MaxUserAuthError:
+        if isinstance(error, MaxUserAuthError):
+            return error
+        if isinstance(error, MaxUserApiError):
+            return MaxUserAuthError(str(error), code=error.code)
+        return MaxUserAuthError("MAX authorization failed", code="auth_error")
+
+    @classmethod
+    def _raise_task_error(cls, task: asyncio.Task) -> None:
+        try:
+            task.result()
+        except asyncio.CancelledError as error:
+            raise MaxUserAuthError("MAX authorization was cancelled", code="auth_error") from error
+        except Exception as error:
+            raise cls._safe_auth_error(error) from error
+
+    @staticmethod
+    def _consume_task_exception(task: asyncio.Task) -> None:
+        with suppress(asyncio.CancelledError, Exception):
+            task.exception()
+
+    @staticmethod
+    def _failure_message(code: str) -> str:
+        return {
+            "qr_unavailable": "MAX did not return a QR code",
+            "qr_expired": "The MAX QR code expired; start a new authorization flow",
+            "connection_error": "MAX connection failed during authorization",
+            "timeout": "MAX authorization timed out",
+            "session_invalid": "The MAX session is no longer authorized",
+            "auth_error": "MAX authorization failed",
+            "2fa_required": "MAX requires a 2FA password; headless QR authorization cannot continue",
+            "identity_missing": "MAX did not return an account identity or session",
+            "max_error": "MAX authorization failed",
+        }.get(code, "MAX authorization failed")
+
+    @classmethod
+    def _mark_flow_failure(cls, flow_id: UUID, code: str) -> None:
+        status = code if code in _FLOW_FAILURE_CODES else "max_error"
+        with SessionLocal() as db:
+            flow = db.get(MaxAuthFlow, flow_id)
+            if flow is not None and flow.status == "qr_code_required":
+                flow.status = status
+                db.commit()
 
     async def _finish(self, runtime: MaxQrRuntime, account_id: int | None, account_label: str | None) -> dict[str, object]:
         profile = self._api.profile_from_client(runtime.handle.client)
@@ -206,20 +330,31 @@ class MaxUserAuthService:
                 raise MaxUserAuthError("MAX authorization flow was not found")
             if flow.status == "completed":
                 return {"flow_id": str(flow_id), "status": "connected"}
-            if flow.status in {"cancelled", "expired"} or flow.expires_at <= datetime.now(timezone.utc):
-                return {"flow_id": str(flow_id), "status": "expired"}
+            if flow.status == "cancelled":
+                return {"flow_id": str(flow_id), "status": "cancelled"}
+            if flow.status in _FLOW_FAILURE_CODES:
+                if flow.status == "qr_expired":
+                    return {"flow_id": str(flow_id), "status": "expired", "error_code": flow.status, "error": self._failure_message(flow.status)}
+                return {"flow_id": str(flow_id), "status": "failed", "error_code": flow.status, "error": self._failure_message(flow.status)}
+            expires_at = flow.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at <= datetime.now(timezone.utc):
+                flow.status = "qr_expired"
+                db.commit()
+                return {"flow_id": str(flow_id), "status": "expired", "error_code": "qr_expired", "error": self._failure_message("qr_expired")}
             runtime = max_qr_runtime.current(user_id, flow_id)
             if runtime is None:
-                flow.status = "expired"
+                flow.status = "qr_expired"
                 db.commit()
-                return {"flow_id": str(flow_id), "status": "expired"}
+                return {"flow_id": str(flow_id), "status": "expired", "error_code": "qr_expired", "error": self._failure_message("qr_expired")}
             return {"flow_id": str(flow_id), "status": "pending", "qr_url": runtime.qr.url, "expires_at": flow.expires_at.isoformat()}
 
     async def cancel(self, user_id: int, flow_id: UUID) -> bool:
         await max_qr_runtime.cancel(user_id, flow_id)
         with SessionLocal() as db:
             flow = db.scalar(select(MaxAuthFlow).where(MaxAuthFlow.id == flow_id, MaxAuthFlow.user_id == user_id))
-            if flow is None or flow.status in {"cancelled", "completed"}:
+            if flow is None or flow.status in {"cancelled", "completed", *_FLOW_FAILURE_CODES}:
                 return False
             flow.status = "cancelled"
             db.commit()
