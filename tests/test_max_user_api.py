@@ -1,6 +1,7 @@
 """Unit tests for MAX user-client primitives without network access."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 import unittest
 
@@ -65,6 +66,57 @@ class MaxUserApiTestCase(unittest.TestCase):
         self.assertEqual(history[0]["id"], 8)
         self.assertEqual(message_id, 9)
         self.assertEqual(client.send_kwargs["chat_id"], 100)
+
+    def test_message_json_keeps_russian_text_and_emoji(self) -> None:
+        normalized = MaxUserApi.message_from_object(
+            {
+                "id": 8,
+                "chat_id": 100,
+                "text": "Привет, MAX 👋",
+                "sender": 42,
+                "attaches": [{"caption": "Документ 📄"}],
+            }
+        )
+
+        json.dumps(normalized, ensure_ascii=False)
+        self.assertEqual(normalized["text"], "Привет, MAX 👋")
+        self.assertEqual(normalized["raw"]["attaches"][0]["caption"], "Документ 📄")
+
+    def test_message_json_replaces_invalid_text_bytes_and_preserves_binary_bytes(self) -> None:
+        normalized = MaxUserApi.message_from_object(
+            {
+                "id": 9,
+                "chat_id": 100,
+                "text": b"\xff\xd0\x9f",
+                "attaches": [{
+                    "caption": b"\xd0\x94\xd0\xbe\xd0\xba\x1f",
+                    "file_data": b"\xff\x00\x80",
+                }],
+            }
+        )
+
+        json.dumps(normalized, ensure_ascii=False)
+        self.assertEqual(normalized["text"], "�П")
+        attachment = normalized["raw"]["attaches"][0]
+        self.assertEqual(attachment["caption"], "Док\x1f")
+        self.assertEqual(attachment["file_data"]["__lifelog_type"], "bytes")
+        self.assertEqual(attachment["file_data"]["encoding"], "base64")
+        self.assertEqual(attachment["file_data"]["data"], "/wCA")
+
+    def test_history_passes_different_limits_to_pymax(self) -> None:
+        class HistoryClient:
+            def __init__(self):
+                self.requests = []
+
+            async def fetch_history(self, **kwargs):
+                self.requests.append(kwargs)
+                return [SimpleNamespace(id=1, chat_id=100, text="ok")]
+
+        client = HistoryClient()
+        for limit in (1, 3, 20):
+            result = asyncio.run(MaxUserApi.get_history(client, 100, limit))
+            self.assertEqual(result[0]["text"], "ok")
+        self.assertEqual([request["backward"] for request in client.requests], [1, 3, 20])
 
     def test_dialogs_are_enriched_from_participants_in_one_batch(self) -> None:
         class ContactClient:

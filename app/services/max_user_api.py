@@ -1,11 +1,17 @@
 """Small, lazy PyMax adapter for personal MAX Web sessions."""
 
 from dataclasses import dataclass
+import base64
+from datetime import date, datetime
+from enum import Enum
 import json
 import logging
+import math
 from pathlib import Path
 import tempfile
+from collections.abc import Mapping
 from typing import Any, Callable
+from uuid import UUID
 
 from app.config.settings import Settings, get_settings
 
@@ -368,15 +374,83 @@ class MaxUserApi:
         sender = raw.get("sender")
         sender_raw = MaxUserApi.as_dict(sender) if sender is not None else {}
         sender_id = MaxUserApi.numeric(sender) or MaxUserApi.numeric(sender_raw.get("id")) or MaxUserApi.numeric(raw.get("sender_id"))
+        text = raw.get("text") or raw.get("body")
         return {
             "id": message_id,
             "chat_id": chat_id,
-            "text": raw.get("text") or raw.get("body"),
+            "text": MaxUserApi._json_safe(text, key="text"),
             "sender_id": sender_id,
-            "time": raw.get("time") or raw.get("timestamp") or raw.get("created_at"),
+            "time": MaxUserApi._json_safe(
+                raw.get("time") or raw.get("timestamp") or raw.get("created_at"),
+                key="time",
+            ),
             "out": bool(raw.get("out") or raw.get("is_out") or raw.get("from_me")),
-            "raw": raw,
+            "raw": MaxUserApi._json_safe(raw),
         }
+
+    _TEXT_BYTE_KEYS = frozenset({
+        "body",
+        "caption",
+        "description",
+        "file_name",
+        "filename",
+        "first_name",
+        "last_name",
+        "mime_type",
+        "name",
+        "text",
+        "title",
+        "username",
+    })
+
+    @staticmethod
+    def _json_safe(value: Any, *, key: str | None = None) -> Any:
+        """Return a JSON-compatible value without losing message records.
+
+        Text-like fields are decoded as UTF-8 with replacement for malformed
+        sequences. Bytes in all other fields are binary data and are kept as a
+        reversible base64 marker instead of being guessed as text.
+        """
+        if value is None or isinstance(value, (str, int, bool)):
+            return value
+        if isinstance(value, float):
+            return value if math.isfinite(value) else None
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            data = bytes(value)
+            if key in MaxUserApi._TEXT_BYTE_KEYS:
+                return data.decode("utf-8", errors="replace")
+            return {
+                "__lifelog_type": "bytes",
+                "encoding": "base64",
+                "data": base64.b64encode(data).decode("ascii"),
+            }
+        if isinstance(value, Enum):
+            return MaxUserApi._json_safe(value.value, key=key)
+        if isinstance(value, (datetime, date, UUID)):
+            return value.isoformat() if hasattr(value, "isoformat") else str(value)
+        if isinstance(value, Mapping):
+            result: dict[str, Any] = {}
+            for raw_key, raw_value in value.items():
+                if isinstance(raw_key, str):
+                    safe_key = raw_key
+                elif isinstance(raw_key, (bytes, bytearray, memoryview)):
+                    safe_key = bytes(raw_key).decode("utf-8", errors="replace")
+                else:
+                    safe_key = str(raw_key)
+                result[safe_key] = MaxUserApi._json_safe(raw_value, key=safe_key)
+            return result
+        if isinstance(value, (list, tuple, set, frozenset)):
+            return [MaxUserApi._json_safe(item, key=key) for item in value]
+        for method_name in ("model_dump", "dict"):
+            method = getattr(value, method_name, None)
+            if callable(method):
+                try:
+                    return MaxUserApi._json_safe(method(), key=key)
+                except TypeError:
+                    pass
+        # Unknown optional objects must not make the complete MCP result
+        # unserializable. Keep a diagnostic marker, never the object itself.
+        return {"__lifelog_type": "unsupported", "class": value.__class__.__name__}
 
     @staticmethod
     def as_dict(value: Any) -> dict[str, Any]:
