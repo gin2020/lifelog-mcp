@@ -6,6 +6,7 @@ import logging
 import httpx
 
 from app.config.settings import Settings, get_settings
+from app.utils.redaction import redact_secrets, register_secret
 
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,8 @@ class TelegramBotService:
     def __init__(self, settings: Settings | None = None) -> None:
         """Initialize the client with Bot API configuration."""
         self._settings = settings or get_settings()
+        if self._settings.telegram_bot_token is not None:
+            register_secret(self._settings.telegram_bot_token.get_secret_value())
 
     async def send_message(self, chat_id: int, text: str) -> None:
         """Deliver a text message to a subscribed Telegram private chat."""
@@ -41,8 +44,10 @@ class TelegramBotService:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(url, json={"chat_id": chat_id, "text": text})
-        except httpx.HTTPError as error:
-            raise TelegramBotApiError(0, "Telegram request failed") from error
+        except httpx.HTTPError:
+            # Do not retain the httpx exception as a cause: its string and
+            # traceback can contain the full Bot API URL.
+            raise TelegramBotApiError(0, "Telegram request failed") from None
 
         try:
             body = response.json()
@@ -55,6 +60,6 @@ class TelegramBotService:
         retry_after = parameters.get("retry_after") if isinstance(parameters, dict) else None
         raise TelegramBotApiError(
             response.status_code,
-            str(body.get("description", "Telegram request failed")),
+            redact_secrets(str(body.get("description", "Telegram request failed"))),
             retry_after if isinstance(retry_after, int) else None,
         )

@@ -2,6 +2,8 @@
 
 import logging
 
+from app.utils.redaction import install_log_redaction
+
 
 def configure_logging() -> None:
     """Configure application logs when no root handler exists yet."""
@@ -13,3 +15,4 @@ def configure_logging() -> None:
         )
 
     logging.getLogger("app").setLevel(logging.INFO)
+    install_log_redaction()

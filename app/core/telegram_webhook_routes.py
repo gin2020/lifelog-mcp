@@ -17,6 +17,7 @@ from app.services.telegram_bot_service import (
     TelegramBotConfigurationError,
     TelegramBotService,
 )
+from app.utils.redaction import redact_secrets
 
 
 logger = logging.getLogger(__name__)
@@ -127,6 +128,15 @@ async def telegram_webhook(request: Request) -> Response:
 
     try:
         await TelegramBotService(settings).send_message(chat_id, reply)
-    except (TelegramBotApiError, TelegramBotConfigurationError):
-        logger.exception("Could not send Telegram webhook command response")
+    except TelegramBotApiError as error:
+        logger.error(
+            "Could not send Telegram webhook command response: status=%s error=%s",
+            error.status_code,
+            redact_secrets(error.description),
+        )
+    except TelegramBotConfigurationError as error:
+        logger.error(
+            "Could not send Telegram webhook command response: error_type=%s",
+            type(error).__name__,
+        )
     return PlainTextResponse("ok")

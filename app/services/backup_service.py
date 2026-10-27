@@ -22,6 +22,7 @@ import httpx
 
 from app.config.settings import Settings, get_settings
 from app.services.backup_crypto import decrypt_file, encrypt_file
+from app.utils.redaction import redact_secrets, register_secret
 
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,8 @@ class BackupTelegramUploader:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
+        if self._settings.telegram_bot_token is not None:
+            register_secret(self._settings.telegram_bot_token.get_secret_value())
 
     async def upload(self, encrypted_path: Path, backup_date: date) -> None:
         """Upload one encrypted document through sendDocument."""
@@ -80,8 +83,9 @@ class BackupTelegramUploader:
                             )
                         },
                     )
-        except (OSError, httpx.HTTPError) as error:
-            raise BackupTelegramError("Telegram upload request failed") from error
+        except (OSError, httpx.HTTPError):
+            # httpx errors may retain a request URL containing the bot token.
+            raise BackupTelegramError("Telegram upload request failed") from None
 
         try:
             body = response.json()
@@ -92,7 +96,7 @@ class BackupTelegramUploader:
         description = body.get("description") if isinstance(body, dict) else None
         raise BackupTelegramError(
             f"Telegram rejected backup upload (HTTP {response.status_code}): "
-            f"{description or 'unknown API error'}"
+            f"{redact_secrets(str(description or 'unknown API error'))}"
         )
 
 
@@ -129,6 +133,10 @@ class BackupService:
         uploader: BackupTelegramUploader | Any | None = None,
     ) -> None:
         self.settings = settings or get_settings()
+        if self.settings.telegram_bot_token is not None:
+            register_secret(self.settings.telegram_bot_token.get_secret_value())
+        if self.settings.backup_encryption_key is not None:
+            register_secret(self.settings.backup_encryption_key.get_secret_value())
         self.uploader = uploader or BackupTelegramUploader(self.settings)
 
     async def run_backup(self, now: datetime | None = None) -> bool:
@@ -400,7 +408,7 @@ class BackupService:
                 secrets.extend([parsed.password, unquote(parsed.password)])
         except ValueError:
             pass
-        safe = message
+        safe = redact_secrets(message)
         for secret in secrets:
             if secret:
                 safe = safe.replace(secret, "[REDACTED]")
