@@ -1,5 +1,6 @@
 """Высокоуровневый MCP-инструмент для сохранения воспоминаний."""
 
+from datetime import datetime
 import logging
 
 from app.core.mcp import mcp
@@ -12,7 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
-def remember(text: str, memory_type: str) -> dict[str, int | str]:
+def remember(
+    text: str,
+    memory_type: str,
+    occurred_at: datetime | None = None,
+) -> dict[str, int | str]:
     """Store general memories only.
 
 Use this tool for:
@@ -42,7 +47,7 @@ The text and memory_type must already be determined before calling this tool.
         with SessionLocal() as session:
             logger.info("MCP tool entered MemoryService: tool=remember")
             memory = MemoryService(session).create_memory(
-                get_request_user_id(session), text, memory_type
+                get_request_user_id(session), text, memory_type, occurred_at
             )
     except Exception:
         logger.exception("MCP tool failed: tool=remember")
